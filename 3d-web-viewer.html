@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bridge SHM 3D Viewer</title>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+        }
+    }
+    </script>
+    <style>
+        :root {
+            --ok: #22c55e;
+            --warn: #f59e0b;
+            --alarm: #ef4444;
+            --offline: #6b7280;
+            --accent: #38bdf8;
+            --panel: rgba(17, 24, 39, 0.82);
+            --border: rgba(148, 163, 184, 0.18);
+            --text: #e5e7eb;
+            --text-dim: #94a3b8;
+            --font: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+        }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        body { font-family: var(--font); color: var(--text); }
+
+        /* 3D canvas + label overlay */
+        #scene {
+            position: fixed; inset: 0; z-index: 0; display: block;
+            width: 100vw; height: 100vh;
+            background: radial-gradient(circle at 50% 20%, #1e293b 0%, #0b1120 70%, #060912 100%);
+        }
+        #labels { position: fixed; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
+
+        /* ---------- overlay scaffolding ---------- */
+        .overlay { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+        .overlay > * { pointer-events: auto; }
+        .panel {
+            background: var(--panel);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            border: 1px solid var(--border); border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+        }
+
+        /* ---------- header ---------- */
+        header {
+            position: fixed; top: 14px; left: 14px; right: 14px;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 16px; padding: 10px 18px;
+        }
+        header .brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+        header h1 { font-size: 16px; font-weight: 600; margin: 0; letter-spacing: 0.2px; }
+        header .sub { font-size: 12px; color: var(--text-dim); }
+        header .meta { display: flex; gap: 18px; align-items: center; font-size: 12px; color: var(--text-dim); }
+        header .meta b { color: var(--text); font-weight: 600; }
+        .live-dot {
+            width: 8px; height: 8px; border-radius: 50%; background: var(--ok);
+            animation: pulse 2s infinite; display: inline-block; margin-right: 6px;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+            70% { box-shadow: 0 0 0 7px rgba(34,197,94,0); }
+            100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+        }
+
+        /* ---------- sidebar ---------- */
+        #sidebar {
+            position: fixed; top: 76px; left: 14px; bottom: 14px; width: 300px;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        #sidebar .head {
+            padding: 12px 16px; border-bottom: 1px solid var(--border);
+            font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px;
+            color: var(--text-dim); display: flex; justify-content: space-between; align-items: center;
+        }
+        #sensorList { overflow-y: auto; padding: 8px; flex: 1; }
+        .group-title {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+            color: var(--text-dim); padding: 12px 8px 6px;
+        }
+        .sensor {
+            display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+            border-radius: 9px; cursor: pointer; border: 1px solid transparent;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .sensor:hover { background: rgba(148, 163, 184, 0.08); }
+        .sensor.selected { background: rgba(56, 189, 248, 0.12); border-color: rgba(56,189,248,0.4); }
+        .sensor .dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+        .sensor .info { flex: 1; min-width: 0; }
+        .sensor .id { font-size: 13px; font-weight: 600; }
+        .sensor .loc { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sensor .reading { text-align: right; font-variant-numeric: tabular-nums; }
+        .sensor .reading .val { font-size: 14px; font-weight: 600; }
+        .sensor .reading .unit { font-size: 10px; color: var(--text-dim); }
+
+        .dot.ok, .swatch.ok { background: var(--ok); }
+        .dot.warn, .swatch.warn { background: var(--warn); }
+        .dot.alarm, .swatch.alarm { background: var(--alarm); }
+        .dot.offline, .swatch.offline { background: var(--offline); }
+
+        .legend { display: flex; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
+        .legend span { display: inline-flex; align-items: center; gap: 5px; }
+        .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+        /* ---------- toolbar ---------- */
+        #toolbar {
+            position: fixed; top: 76px; right: 14px;
+            display: flex; flex-direction: column; gap: 8px; padding: 10px; width: 168px;
+        }
+        #toolbar .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); padding: 2px 2px 0; }
+        .btn {
+            appearance: none; border: 1px solid var(--border); background: rgba(148,163,184,0.06);
+            color: var(--text); font-family: var(--font); font-size: 12px; font-weight: 500;
+            padding: 8px 10px; border-radius: 8px; cursor: pointer; text-align: left;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .btn:hover { background: rgba(148,163,184,0.15); }
+        .btn.active { background: rgba(56,189,248,0.18); border-color: rgba(56,189,248,0.5); color: #e0f2fe; }
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        /* ---------- info panel ---------- */
+        #infoPanel { position: fixed; bottom: 14px; right: 14px; width: 340px; padding: 16px; display: none; }
+        #infoPanel.show { display: block; }
+        #infoPanel .ip-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+        #infoPanel .ip-title { font-size: 15px; font-weight: 600; }
+        #infoPanel .ip-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+        #infoPanel .close { cursor: pointer; color: var(--text-dim); font-size: 18px; line-height: 1; background: none; border: none; padding: 2px 6px; }
+        #infoPanel .close:hover { color: var(--text); }
+        .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .status-pill.ok { background: rgba(34,197,94,0.15); color: #86efac; }
+        .status-pill.warn { background: rgba(245,158,11,0.15); color: #fcd34d; }
+        .status-pill.alarm { background: rgba(239,68,68,0.15); color: #fca5a5; }
+        .status-pill.offline { background: rgba(107,114,128,0.2); color: #cbd5e1; }
+        .ip-value { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 14px 0 2px; }
+        .ip-value .u { font-size: 15px; font-weight: 500; color: var(--text-dim); margin-left: 4px; }
+        .ip-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; font-size: 12px; margin-top: 12px; }
+        .ip-grid dt { color: var(--text-dim); }
+        .ip-grid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+        .spark-wrap { margin-top: 14px; }
+        .spark-wrap .cap { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; display: flex; justify-content: space-between; }
+
+        /* ---------- loading ---------- */
+        #loader {
+            position: fixed; inset: 0; z-index: 50;
+            background: radial-gradient(circle at 50% 40%, #111827 0%, #060912 100%);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 20px; transition: opacity 0.6s ease; color: var(--text);
+        }
+        #loader.hide { opacity: 0; pointer-events: none; }
+        #loader .title { font-size: 15px; font-weight: 600; letter-spacing: 0.3px; }
+        #loader .bar { width: 240px; height: 4px; border-radius: 999px; background: rgba(148,163,184,0.2); overflow: hidden; }
+        #loader .fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #818cf8); transition: width 0.2s; }
+        #loader .pct { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+        /* ---------- 3D marker labels (CSS2D) ---------- */
+        .marker-label {
+            background: rgba(11, 17, 32, 0.85); color: #fff; font-family: var(--font);
+            font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+            white-space: nowrap; border: 1px solid var(--border); cursor: pointer;
+            transform: translateY(-6px); user-select: none;
+        }
+        .marker-label.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+        body.no-labels .marker-label { display: none; }
+
+        /* ---------- responsive ---------- */
+        @media (max-width: 720px) {
+            #sidebar { width: calc(100vw - 28px); bottom: auto; max-height: 40vh; }
+            #toolbar { top: auto; bottom: 14px; left: 14px; right: 14px; width: auto; flex-direction: row; flex-wrap: wrap; }
+            #infoPanel { width: calc(100vw - 28px); left: 14px; }
+            header .meta { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="scene"></canvas>
+    <div id="labels"></div>
+
+    <!-- ================= OVERLAY UI ================= -->
+    <div class="overlay">
+        <header class="panel">
+            <div class="brand">
+                <h1>Bridge Structural Health Monitoring</h1>
+                <span class="sub">Model 260609_BKT</span>
+            </div>
+            <div class="meta">
+                <div><span class="live-dot"></span><b id="statusSummary">—</b></div>
+                <div>Span <b>76.8 m</b></div>
+                <div>Sensors <b id="sensorCount">0</b></div>
+                <div><b id="clock">--:--:--</b></div>
+            </div>
+        </header>
+
+        <aside id="sidebar" class="panel">
+            <div class="head"><span>Sensors</span><span id="onlineCount">—</span></div>
+            <div id="sensorList"></div>
+            <div class="legend">
+                <span><i class="swatch ok"></i>Normal</span>
+                <span><i class="swatch warn"></i>Warning</span>
+                <span><i class="swatch alarm"></i>Alarm</span>
+                <span><i class="swatch offline"></i>Offline</span>
+            </div>
+        </aside>
+
+        <div id="toolbar" class="panel">
+            <div class="label">View</div>
+            <div class="btn-grid">
+                <button class="btn" data-view="iso">Isometric</button>
+                <button class="btn" data-view="top">Top</button>
+                <button class="btn" data-view="elev">Elevation</button>
+                <button class="btn" data-view="reset">Reset</button>
+            </div>
+            <div class="label">Display</div>
+            <button class="btn" id="toggleRotate">Auto-rotate: Off</button>
+            <button class="btn active" id="toggleMarkers">Sensor color: On</button>
+            <button class="btn active" id="toggleLabels">Labels: On</button>
+        </div>
+
+        <div id="infoPanel" class="panel"></div>
+    </div>
+
+    <div id="loader">
+        <div class="title">Loading bridge model…</div>
+        <div class="bar"><div class="fill" id="loadFill"></div></div>
+        <div class="pct" id="loadPct">0%</div>
+    </div>
+
+    <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+    /* =====================================================================
+       SENSOR CONFIG  —  data-driven, extensible.
+       Add strain gauges / accelerometers / more cameras here; the sidebar,
+       3D markers and info panel are all generated from this array.
+       `position` is in the model's own coordinate frame (metres, Y-up).
+       ===================================================================== */
+    const SENSORS = [
+        // --- LiDAR range-finders installed on the edge girders (Benewake TF03-100) ---
+        { id:'LDR-01', type:'lidar',  label:'LiDAR TF03-100', position:[-2.26, 4.202, 17.457],
+          location:'West girder · Z≈17.5 m', metric:'Deflection', unit:'mm', nominal:118, warn:[110,130], alarm:[105,140] },
+        { id:'LDR-02', type:'lidar',  label:'LiDAR TF03-100', position:[-2.26, 4.202, 22.457],
+          location:'West girder · Z≈22.5 m', metric:'Deflection', unit:'mm', nominal:122, warn:[110,130], alarm:[105,140] },
+        { id:'LDR-03', type:'lidar',  label:'LiDAR TF03-100', position:[13.619, 4.202, 17.457],
+          location:'East girder · Z≈17.5 m', metric:'Deflection', unit:'mm', nominal:120, warn:[110,130], alarm:[105,140] },
+        { id:'LDR-04', type:'lidar',  label:'LiDAR TF03-100', position:[13.619, 4.202, 22.457],
+          location:'East girder · Z≈22.5 m', metric:'Deflection', unit:'mm', nominal:124, warn:[110,130], alarm:[105,140] },
+        // --- Monitoring cameras on the high side rails (signal quality %) ---
+        { id:'CAM-01', type:'camera', label:'Monitoring Camera', position:[-2.42, 8.89, 9.82],
+          location:'West rail · high mount · Z≈9.8 m', metric:'Signal', unit:'%', nominal:99, warn:[92,101], alarm:[82,101] },
+        { id:'CAM-02', type:'camera', label:'Monitoring Camera', position:[13.75, 9.05, 31.08],
+          location:'East rail · high mount · Z≈31.1 m', metric:'Signal', unit:'%', nominal:98, warn:[92,101], alarm:[82,101] },
+    ];
+
+    const HISTORY_LEN = 60;
+    const TYPE_LABELS = { lidar:'LiDAR — Girder Deflection', camera:'Cameras' };
+    const STATUS_HEX  = { ok:0x22c55e, warn:0xf59e0b, alarm:0xef4444, offline:0x6b7280 };
+
+    const state = {};
+    SENSORS.forEach(s => { state[s.id] = { value:s.nominal, status:'ok', history:[], offline:false, eventTicks:0, eventTarget:s.nominal }; });
+
+    /* ===================================================================== */
+    /* THREE.JS SCENE                                                        */
+    /* ===================================================================== */
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setClearAlpha(0);
+    renderer.toneMapping = THREE.NeutralToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    const scene = new THREE.Scene();
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.5, 8000);
+    camera.position.set(-80, 55, 90);
+
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.autoRotateSpeed = 0.8;
+    controls.minDistance = 2;
+
+    const dir = new THREE.DirectionalLight(0xffffff, 1.6);
+    dir.position.set(0.6, 1, 0.4);
+    scene.add(dir);
+
+    const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+    labelRenderer.setSize(innerWidth, innerHeight);
+
+    // camera fly-to tween state
+    let fly = null;
+    const easeInOut = k => k < 0.5 ? 4*k*k*k : 1 - Math.pow(-2*k+2, 3)/2;
+    function flyTo(toPos, toTarget, dur = 700) {
+        fly = { fromP:camera.position.clone(), toP:toPos.clone(),
+                fromT:controls.target.clone(), toT:toTarget.clone(), start:performance.now(), dur };
+        controls.enabled = false;
+    }
+
+    // model framing info (filled on load)
+    let bboxCenter = new THREE.Vector3(5.68, 3.25, 20.46);
+    let span = 76.8;
+
+    /* ---------- 3D sensor markers ---------- */
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
+    const markerMap = {};          // id -> { core, halo, label }
+    const pickable = [];           // meshes for click raycasting
+
+    function buildMarkers() {
+        for (const s of SENSORS) {
+            const g = new THREE.Group();
+            g.position.set(...s.position);
+
+            // nametag only — the sensor's own geometry (coloured below) is the marker
+            const el = document.createElement('div');
+            el.className = 'marker-label';
+            el.textContent = s.id;
+            el.addEventListener('pointerdown', e => { e.stopPropagation(); select(s.id); });
+            const label = new CSS2DObject(el);
+            label.position.set(0, 1.0, 0);
+
+            g.add(label);
+            markerGroup.add(g);
+            markerMap[s.id] = { label:el, meshMats:[] };
+        }
+    }
+
+    // Tint the actual sensor geometry inside the model by status. Sensor meshes
+    // are found by proximity to the configured position (and small size, so the
+    // girder they sit on is never picked); their shared materials are cloned so
+    // each sensor colours independently.
+    function attachSensorMeshes(root) {
+        root.updateMatrixWorld(true);
+        const all = [];
+        const box = new THREE.Box3(), c = new THREE.Vector3(), sz = new THREE.Vector3();
+        root.traverse(o => {
+            if (!o.isMesh) return;
+            box.setFromObject(o); box.getCenter(c); box.getSize(sz);
+            all.push({ o, c: c.clone(), max: Math.max(sz.x, sz.y, sz.z) });
+        });
+        for (const s of SENSORS) {
+            const p = new THREE.Vector3(...s.position);
+            const R = s.type === 'camera' ? 0.7 : 0.4;
+            const mats = [];
+            for (const m of all) {
+                if (m.max > 1.2 || m.c.distanceTo(p) > R) continue;
+                m.o.userData.id = s.id; pickable.push(m.o);      // clicking the sensor selects it
+                const arr = Array.isArray(m.o.material)
+                    ? (m.o.material = m.o.material.map(x => x.clone()))
+                    : [m.o.material = m.o.material.clone()];
+                for (const mat of arr) {                          // remember original look for the toggle
+                    mat.userData.origColor = mat.color ? mat.color.getHex() : null;
+                    mat.userData.origEmissive = mat.emissive ? mat.emissive.getHex() : null;
+                    mat.userData.origEI = mat.emissiveIntensity;
+                    mats.push(mat);
+                }
+            }
+            markerMap[s.id].meshMats = mats;
+        }
+    }
+
+    /* ---------- status + simulation ---------- */
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    function statusOf(s, v) {
+        if (state[s.id].offline) return 'offline';
+        const [al, ah] = s.alarm, [wl, wh] = s.warn;
+        if (v <= al || v >= ah) return 'alarm';
+        if (v <= wl || v >= wh) return 'warn';
+        return 'ok';
+    }
+
+    /* =====================================================================
+       DATA LAYER — updateReadings() is the ONLY producer of values.
+       Replace its body with a fetch()/WebSocket handler to go live; the rest
+       of the dashboard consumes state[id].value / .status / .history.
+       The occasional "excursion" logic just makes the demo visibly cross the
+       warning/alarm thresholds so the marker colours change over time.
+       ===================================================================== */
+    function updateReadings() {
+        for (const s of SENSORS) {
+            const st = state[s.id];
+            if (st.eventTicks > 0) { st.eventTicks--; }
+            else if (Math.random() < 0.02) {                 // start a threshold excursion
+                st.eventTicks = 4 + Math.floor(Math.random() * 6);
+                const goAlarm = Math.random() < 0.4;
+                const band = goAlarm ? s.alarm : s.warn;
+                const bump = goAlarm ? 2 : 0;
+                st.eventTarget = Math.random() < 0.5 ? band[0] - bump : band[1] + bump;
+            }
+            const target = st.eventTicks > 0 ? st.eventTarget : s.nominal;
+            let v = st.value + (target - st.value) * 0.25 + (Math.random() - 0.5) * 1.2;
+            v = clamp(v, s.alarm[0] - 5, s.alarm[1] + 5);
+            if (s.unit === '%') v = Math.min(v, 100);
+            st.value = v;
+            st.status = statusOf(s, v);
+            st.history.push(v);
+            if (st.history.length > HISTORY_LEN) st.history.shift();
+        }
+        render();
+    }
+
+    /* ---------- rendering (DOM + marker colours) ---------- */
+    let selected = null;
+    let colorSensors = true;
+    const fmt = s => s.unit === '%' ? state[s.id].value.toFixed(0) : state[s.id].value.toFixed(1);
+
+    function buildSidebar() {
+        const listEl = document.getElementById('sensorList');
+        listEl.innerHTML = '';
+        for (const type of [...new Set(SENSORS.map(s => s.type))]) {
+            const group = SENSORS.filter(s => s.type === type);
+            const title = document.createElement('div');
+            title.className = 'group-title';
+            title.textContent = `${TYPE_LABELS[type] || type} (${group.length})`;
+            listEl.appendChild(title);
+            for (const s of group) {
+                const row = document.createElement('div');
+                row.className = 'sensor'; row.id = `row-${s.id}`;
+                row.innerHTML = `
+                    <span class="dot ok" id="dot-${s.id}"></span>
+                    <div class="info"><div class="id">${s.id}</div><div class="loc">${s.location}</div></div>
+                    <div class="reading"><div class="val" id="val-${s.id}">–</div><div class="unit">${s.unit}</div></div>`;
+                row.addEventListener('click', () => select(s.id));
+                listEl.appendChild(row);
+            }
+        }
+    }
+
+    function render() {
+        let alarms = 0, warns = 0, online = 0;
+        for (const s of SENSORS) {
+            const st = state[s.id];
+            const dot = document.getElementById(`dot-${s.id}`);
+            const val = document.getElementById(`val-${s.id}`);
+            if (dot) dot.className = `dot ${st.status}`;
+            if (val) val.textContent = fmt(s);
+            const m = markerMap[s.id];
+            if (m) {
+                const hex = STATUS_HEX[st.status];
+                // only the SELECTED sensor shows its status colour; the rest stay original
+                const tint = colorSensors && s.id === selected;
+                for (const mat of m.meshMats) {
+                    if (tint) {
+                        if (mat.color) mat.color.setHex(hex);
+                        if (mat.emissive) { mat.emissive.setHex(hex); mat.emissiveIntensity = 1.0; }
+                    } else {
+                        if (mat.color && mat.userData.origColor != null) mat.color.setHex(mat.userData.origColor);
+                        if (mat.emissive && mat.userData.origEmissive != null) { mat.emissive.setHex(mat.userData.origEmissive); mat.emissiveIntensity = mat.userData.origEI; }
+                    }
+                }
+            }
+            if (st.status === 'alarm') alarms++; else if (st.status === 'warn') warns++;
+            if (!st.offline) online++;
+        }
+        const summary = document.getElementById('statusSummary');
+        if (alarms)      { summary.textContent = `${alarms} Alarm${alarms>1?'s':''}`;   summary.style.color = 'var(--alarm)'; }
+        else if (warns)  { summary.textContent = `${warns} Warning${warns>1?'s':''}`;   summary.style.color = 'var(--warn)'; }
+        else             { summary.textContent = 'All Normal';                           summary.style.color = 'var(--ok)'; }
+        document.getElementById('onlineCount').textContent = `${online}/${SENSORS.length} online`;
+        if (selected) renderInfo(selected);
+    }
+
+    /* ---------- selection ---------- */
+    function select(id) {
+        selected = id;
+        const s = SENSORS.find(x => x.id === id);
+        document.querySelectorAll('.sensor').forEach(r => r.classList.remove('selected'));
+        document.getElementById(`row-${id}`)?.classList.add('selected');
+        Object.entries(markerMap).forEach(([k, m]) => m.label.classList.toggle('selected', k === id));
+        // fly the camera in to the sensor
+        const p = new THREE.Vector3(...s.position);
+        const close = s.type === 'camera' ? 8 : 5;
+        const off = new THREE.Vector3((s.position[0] < bboxCenter.x ? -1 : 1), 0.7, 1).normalize().multiplyScalar(close);
+        flyTo(p.clone().add(off), p);
+        render();                                   // tint the newly-selected sensor immediately
+        document.getElementById('infoPanel').classList.add('show');
+    }
+
+    function deselect() {
+        selected = null;
+        document.getElementById('infoPanel').classList.remove('show');
+        document.querySelectorAll('.sensor').forEach(r => r.classList.remove('selected'));
+        Object.values(markerMap).forEach(m => m.label.classList.remove('selected'));
+        render();                                   // restore all sensors to original colour
+    }
+
+    function renderInfo(id) {
+        const s = SENSORS.find(x => x.id === id), st = state[id];
+        document.getElementById('infoPanel').innerHTML = `
+            <div class="ip-head">
+                <div>
+                    <div class="ip-title">${s.id} · ${s.label}</div>
+                    <div class="ip-sub">${s.location}</div>
+                </div>
+                <button class="close" id="ipClose" title="Close">&times;</button>
+            </div>
+            <div class="ip-value">${fmt(s)}<span class="u">${s.unit}</span>
+                <span class="status-pill ${st.status}" style="vertical-align:middle;margin-left:8px;">${st.status}</span>
+            </div>
+            <div class="ip-sub">${s.metric}</div>
+            <div class="spark-wrap">
+                <div class="cap"><span>Last ${HISTORY_LEN}s</span><span>warn ${s.warn[0]}–${s.warn[1]} ${s.unit}</span></div>
+                ${sparkline(st.history, s)}
+            </div>
+            <dl class="ip-grid">
+                <dt>Type</dt><dd>${s.type === 'lidar' ? 'LiDAR TF03-100' : 'Camera'}</dd>
+                <dt>Warning band</dt><dd>${s.warn[0]} – ${s.warn[1]} ${s.unit}</dd>
+                <dt>Alarm band</dt><dd>${s.alarm[0]} – ${s.alarm[1]} ${s.unit}</dd>
+                <dt>Position (x,y,z)</dt><dd>${s.position.map(n => n.toFixed(1)).join(', ')}</dd>
+            </dl>`;
+        document.getElementById('ipClose').addEventListener('click', deselect);
+    }
+
+    function sparkline(history, s) {
+        const W = 308, H = 60, pad = 4;
+        if (history.length < 2) return `<svg width="100%" viewBox="0 0 ${W} ${H}"></svg>`;
+        const lo = s.alarm[0] - 4, hi = s.alarm[1] + 4;
+        const xs = i => pad + (i / (HISTORY_LEN - 1)) * (W - 2 * pad);
+        const ys = v => H - pad - ((clamp(v, lo, hi) - lo) / (hi - lo)) * (H - 2 * pad);
+        const pts = history.map((v, i) => `${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ');
+        const cur = history[history.length - 1];
+        const col = getComputedStyle(document.documentElement).getPropertyValue(`--${statusOf(s, cur)}`).trim();
+        return `
+            <svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block">
+                <rect x="0" y="${ys(s.warn[1]).toFixed(1)}" width="${W}" height="${(ys(s.warn[0])-ys(s.warn[1])).toFixed(1)}" fill="rgba(34,197,94,0.10)"/>
+                <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+                <circle cx="${xs(history.length-1).toFixed(1)}" cy="${ys(cur).toFixed(1)}" r="2.6" fill="${col}"/>
+            </svg>`;
+    }
+
+    /* ---------- view presets ---------- */
+    function fitDistance(fitSpan) { return (fitSpan / 2) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * 1.15; }
+    function applyView(name) {
+        const c = bboxCenter, D = fitDistance(span);
+        let pos;
+        if (name === 'top')       pos = new THREE.Vector3(c.x + 0.01, c.y + D * 1.55, c.z + 0.02);
+        else if (name === 'elev') pos = new THREE.Vector3(c.x + D, c.y + span * 0.12, c.z);
+        else                      pos = new THREE.Vector3(c.x - D * 0.7, c.y + D * 0.5, c.z + D * 0.7); // iso / reset
+        flyTo(pos, c);
+        if (name === 'reset') deselect();
+    }
+    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => applyView(b.dataset.view)));
+
+    /* ---------- display toggles ---------- */
+    const rotateBtn = document.getElementById('toggleRotate');
+    const markersBtn = document.getElementById('toggleMarkers');
+    const labelsBtn = document.getElementById('toggleLabels');
+    rotateBtn.addEventListener('click', () => {
+        controls.autoRotate = !controls.autoRotate;
+        rotateBtn.textContent = `Auto-rotate: ${controls.autoRotate ? 'On' : 'Off'}`;
+        rotateBtn.classList.toggle('active', controls.autoRotate);
+    });
+    markersBtn.addEventListener('click', () => {         // colour the sensor bodies by status, or restore
+        colorSensors = !colorSensors;
+        markersBtn.textContent = `Sensor color: ${colorSensors ? 'On' : 'Off'}`;
+        markersBtn.classList.toggle('active', colorSensors);
+        render();
+    });
+    labelsBtn.addEventListener('click', () => {          // show/hide the nametags
+        const off = !document.body.classList.contains('no-labels');
+        document.body.classList.toggle('no-labels', off);
+        labelsBtn.textContent = `Labels: ${off ? 'Off' : 'On'}`;
+        labelsBtn.classList.toggle('active', !off);
+    });
+
+    /* ---------- click-to-select via raycasting ---------- */
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    let downXY = null;
+    canvas.addEventListener('pointerdown', e => downXY = { x:e.clientX, y:e.clientY });
+    canvas.addEventListener('pointerup', e => {
+        if (!downXY) return;
+        const moved = Math.hypot(e.clientX - downXY.x, e.clientY - downXY.y);
+        downXY = null;
+        if (moved > 5) return;                           // was an orbit drag
+        const r = canvas.getBoundingClientRect();
+        pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+        raycaster.setFromCamera(pointer, camera);
+        const hit = raycaster.intersectObjects(pickable, false)[0];
+        if (hit) select(hit.object.userData.id);
+    });
+
+    /* ---------- clock + deep links ---------- */
+    function tickClock() { document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour12:false }); }
+
+    /* ---------- resize ---------- */
+    addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        labelRenderer.setSize(innerWidth, innerHeight);
+    });
+
+    /* ---------- render loop ---------- */
+    function animate() {
+        requestAnimationFrame(animate);
+        const t = performance.now();
+        if (fly) {
+            const k = Math.min(1, (t - fly.start) / fly.dur), e = easeInOut(k);
+            camera.position.lerpVectors(fly.fromP, fly.toP, e);
+            controls.target.lerpVectors(fly.fromT, fly.toT, e);
+            camera.lookAt(controls.target);
+            if (k >= 1) { fly = null; controls.enabled = true; }
+        } else {
+            controls.update();
+        }
+        for (const s of SENSORS) {
+            const m = markerMap[s.id]; if (!m) continue;
+            if (colorSensors && s.id === selected && state[s.id].status === 'alarm') {   // pulse the selected sensor's glow on alarm
+                const ei = 0.5 + Math.abs(Math.sin(t * 0.006)) * 1.2;
+                for (const mat of m.meshMats) if (mat.emissive) mat.emissiveIntensity = ei;
+            }
+        }
+        renderer.render(scene, camera);
+        labelRenderer.render(scene, camera);
+    }
+
+    /* ===================================================================== */
+    /* BOOT: load model                                                      */
+    /* ===================================================================== */
+    document.getElementById('sensorCount').textContent = SENSORS.length;
+    buildSidebar();
+    buildMarkers();
+    tickClock();
+    updateReadings();
+    setInterval(updateReadings, 1000);
+    setInterval(tickClock, 1000);
+    animate();
+
+    const loader = document.getElementById('loader');
+    new GLTFLoader().load('260609_BKT.glb',
+        gltf => {
+            scene.add(gltf.scene);
+            attachSensorMeshes(gltf.scene);
+            const box = new THREE.Box3().setFromObject(gltf.scene);
+            box.getCenter(bboxCenter);
+            const size = box.getSize(new THREE.Vector3());
+            span = Math.max(size.x, size.z);
+            controls.target.copy(bboxCenter);
+            controls.maxDistance = span * 4;
+            loader.classList.add('hide');
+            setTimeout(() => loader.remove(), 700);
+            // deep-link: ?view=iso|top|elev|reset and/or ?sensor=LDR-03 (shareable links)
+            const params = new URLSearchParams(location.search);
+            if (params.get('sensor') && state[params.get('sensor')]) select(params.get('sensor'));
+            else applyView(params.get('view') || 'iso');
+        },
+        xhr => {
+            if (xhr.total) {
+                const p = Math.round(xhr.loaded / xhr.total * 100);
+                document.getElementById('loadFill').style.width = p + '%';
+                document.getElementById('loadPct').textContent = p + '%';
+            }
+        },
+        err => {
+            console.error(err);
+            document.querySelector('#loader .title').textContent = 'Failed to load model';
+        });
+    </script>
+</body>
+</html>
