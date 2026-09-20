@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#060912">
+    <meta name="description" content="On-site reference for locating installed monitoring hardware on bridge structures.">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Bridge Sensor Inspector</title>
+    <link rel="stylesheet" href="css/app.css">
+    <!--
+      three.js is pinned to 0.163.0 on purpose. The models declare
+      KHR_materials_pbrSpecularGlossiness, which no current three.js reads; they
+      fall back to the pbrMetallicRoughness block every material also carries,
+      and extensionsRequired is empty, so they render correctly. Bumping the
+      version changes nothing here, so don't.
+    -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <canvas id="scene"></canvas>
+    <div id="labels"></div>
+
+    <header id="topbar" class="panel">
+        <button id="siteBtn" class="btn" aria-haspopup="dialog">
+            <span class="st">
+                <span class="nm wrap-any" id="siteName">Bridge Sensor Inspector</span>
+                <span class="sb" id="siteSub">Choose a site</span>
+            </span>
+            <span class="caret" aria-hidden="true">&#9662;</span>
+        </button>
+        <button id="compassBtn" class="btn" aria-pressed="false"
+                title="Turn the view to face the same way as the phone">Compass</button>
+    </header>
+
+    <div id="chips" role="group" aria-label="Filter by sensor type"></div>
+
+    <section id="calib" class="panel" aria-label="Compass alignment">
+        <div class="ch">
+            <span>Compass</span>
+            <span class="hdg" id="calHeading">&ndash;</span>
+        </div>
+        <div class="cnote" id="calNote">
+            Drag the view until it matches what is in front of you &mdash; the alignment is saved for this site.
+        </div>
+        <div class="crow">
+            <button class="btn small nudge" data-nudge="-5">&minus;5&deg;</button>
+            <button class="btn small" id="calAlign">Align to this view</button>
+            <button class="btn small nudge" data-nudge="5">+5&deg;</button>
+        </div>
+        <div class="crow" style="margin-top:8px">
+            <button class="btn small" id="calTilt" aria-pressed="false">Follow tilt: Off</button>
+            <button class="btn small" id="calReset">Reset</button>
+        </div>
+        <div class="off" id="calOffset"></div>
+    </section>
+
+    <section id="sheet" aria-label="Sensors">
+        <div id="sheetGrip"><i></i></div>
+        <div id="sheetHead">
+            <b id="sheetTitle">Sensors</b>
+            <span id="sheetSub"></span>
+        </div>
+        <nav id="viewTools" aria-label="View presets">
+            <button class="btn small" data-view="iso">Iso</button>
+            <button class="btn small" data-view="top">Top</button>
+            <button class="btn small" data-view="elev">Side</button>
+            <button class="btn small active" id="toggleLabels" aria-pressed="true">Tags</button>
+            <button class="btn small" id="toggleFocus" aria-pressed="false">Focus</button>
+        </nav>
+        <div id="sheetBody">
+            <div id="detail"></div>
+            <div id="sensorList"></div>
+        </div>
+    </section>
+
+    <div id="picker" role="dialog" aria-modal="true" aria-label="Choose site">
+        <h2>Choose site</h2>
+        <div class="ph">Tap a site to load its model.</div>
+        <div class="list" id="siteList"></div>
+        <button class="btn" id="pickerClose">Close</button>
+    </div>
+
+    <div id="loader">
+        <div class="lt" id="loadTitle">Bridge Sensor Inspector</div>
+        <div class="ls" id="loadSub">Starting&hellip;</div>
+        <div class="bar"><div class="fill" id="loadFill"></div></div>
+        <div class="pct" id="loadPct">0%</div>
+        <button class="btn" id="loadRetry" hidden>Choose another site</button>
+    </div>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <noscript>
+        <p style="padding:24px;color:#f1f5f9;font-family:sans-serif">
+            This viewer needs JavaScript and WebGL.
+        </p>
+    </noscript>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
