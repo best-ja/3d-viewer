@@ -110,6 +110,9 @@ export const SITES = [
         unitLabels: {
             axle:   ['AXLE-03', 'AXLE-02', 'AXLE-04', 'AXLE-01'],
         },
+        views: {
+            cabinet: {azimuth: 90, elevation: -12, distance: 12},
+        },
     },
     {
         code: 'PM1-BWK',
