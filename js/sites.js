@@ -77,9 +77,9 @@ export const SITES = [
     {
         code: 'SSW',
         name: 'SSW',                          // <- edit: display name
-        file: 'Model-glb/260916_SSW.glb',
-        sizeMB: 14.7,
-        captured: '2026-09-16',
+        file: 'Model-glb/260921_SSW_VE.glb',
+        sizeMB: 21.9,
+        captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],                            // <- edit: [{ label: 'P13', at: 4.7 }, ...]
         unitLabels: {
@@ -89,9 +89,9 @@ export const SITES = [
     {
         code: 'TPA',
         name: 'TPA',                          // <- edit: display name
-        file: 'Model-glb/260916_TPA.glb',
-        sizeMB: 11.4,
-        captured: '2026-09-18',
+        file: 'Model-glb/260921_TPA_VE.glb',
+        sizeMB: 13.3,
+        captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],
         unitLabels: {
@@ -103,7 +103,7 @@ export const SITES = [
         code: 'BRC',
         name: 'BRC',                          // <- edit: display name
         file: 'Model-glb/260921_BRC_VE.glb',
-        sizeMB: 9.8,
+        sizeMB: 16.6,
         captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],
@@ -117,9 +117,9 @@ export const SITES = [
     {
         code: 'PM1-BWK',
         name: 'PM1-BWK',                      // <- edit: display name
-        file: 'Model-glb/260919_PM1-BWK.glb',
+        file: 'Model-glb/260921_PM1-BWK_VE.glb',
         sizeMB: 9.3,
-        captured: '2026-09-19',
+        captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],
         unitLabels: {
@@ -130,7 +130,7 @@ export const SITES = [
         code: 'BKT',
         name: 'BKT',                          // <- edit: display name
         file: 'Model-glb/260921_BKT_VE.glb',
-        sizeMB: 16.5,
+        sizeMB: 22.3,
         captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],
