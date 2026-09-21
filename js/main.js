@@ -1,66 +1,59 @@
 /**
  * Boot and wiring.
  *
- * Deep links: ?site=BKT and optionally &sensor=LDR-03 so a location can be
- * sent to another inspector as a plain URL.
+ * Deep links: ?site=BKT, optionally &type=weight, so a view can be sent to
+ * someone else as a plain URL.
  */
 import { SITES, getSite } from './sites.js';
 import { createViewer } from './viewer.js';
-import { detectSensors, createMarkers, countByType } from './sensors.js';
+import { detectSensors, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
 import { createCompass } from './compass.js';
 import { createUI } from './ui.js';
 
-const LAST_SITE_KEY = 'bsi.lastSite';
+const LAST_SITE_KEY = 'bwim.lastSite';
 const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 
-const viewer = createViewer({
-    canvas: document.getElementById('scene'),
-    labelsEl: document.getElementById('labels'),
-});
+const viewer = createViewer({ canvas: document.getElementById('scene') });
 
-let site = null;        // current site record
-let sensors = [];       // detected sensors for that site
-let markers = null;     // marker layer
-let filter = null;
-let selectedId = null;
+let site = null;          // current site record
+let groups = null;        // { axle, camera, weight } from detectSensors
+let highlighter = null;
+let activeType = null;
 let loading = false;
 
 /* ------------------------------------------------------------------ *
- * Selection / filtering                                               *
+ * Type selection                                                      *
  * ------------------------------------------------------------------ */
-function select(id, { fly = false } = {}) {
-    const s = id ? sensors.find(x => x.id === id) : null;
-    selectedId = s ? s.id : null;
-    markers?.setSelected(selectedId);
-    ui.setSelected(selectedId);
-    if (s && fly) flyToSensor(s);
-    syncUrl();
-}
+function selectType(k) {
+    if (!groups) return;
+    const type = SENSOR_TYPES.find(t => t.key === k) || null;
+    activeType = type ? type.key : null;
 
-function flyToSensor(s) {
-    // Far enough out to see the unit against the structure it is mounted on -
-    // closer than this and the girder fills the screen with flat concrete.
-    viewer.focusOn(s.position, s.type === 'camera' ? 17 : 13);
-}
+    highlighter.set(activeType);
+    ui.setActiveType(activeType);
 
-function setFilter(type) {
-    filter = type || null;
-    markers?.setTypeFilter(filter);
-    ui.setFilter(filter);
-    if (filter && selectedId) {
-        const s = sensors.find(x => x.id === selectedId);
-        if (s && s.type !== filter) select(null);
+    if (type) {
+        viewer.frameBox(groups[type.key].focus, type.framing);
+        // BKT ships its camera nodes as empty placeholders, so there is a
+        // position to fly to but nothing to light up. Say so rather than
+        // leaving someone staring at an unchanged model.
+        if (type.key === CAMERA && !groups[CAMERA].meshes.length) {
+            ui.toast('This model has no camera geometry — showing the mounting position only.', 4200);
+        }
+    } else {
+        viewer.frameModel();
     }
+    syncUrl();
 }
 
 function syncUrl() {
     if (!site) return;
     const p = new URLSearchParams();
     p.set('site', site.code);
-    if (selectedId) p.set('sensor', selectedId);
+    if (activeType) p.set('type', activeType);
     history.replaceState(null, '', `${location.pathname}?${p}`);
 }
 
@@ -70,17 +63,13 @@ function syncUrl() {
 const ui = createUI({
     onOpenPicker: () => { ui.buildPicker(SITES, site?.code); ui.openPicker(); },
     onChooseSite: s => loadSite(s),
-    onFilter: setFilter,
-    onSelectSensor: id => select(id, { fly: !!id }),
-    onLocate: id => { const s = sensors.find(x => x.id === id); if (s) flyToSensor(s); },
-    onView: name => { viewer.cancelFly(); viewer.applyView(name); if (name === 'iso') select(null); },
-    onInvalidate: () => viewer.invalidate(),
-    onFocusDim: on => viewer.setFocusDim(on),
+    onSelectType: selectType,
+    onOverview: () => selectType(null),
     onCompassToggle: () => (compass.active ? stopCompass() : startCompass()),
     onCalibrate: (what, arg) => {
         if (what === 'align') {
             ui.toast(compass.alignToCurrentView()
-                ? 'Aligned. Saved for this site.'
+                ? 'Aligned. Saved for this bridge.'
                 : 'No heading yet — wait for the compass to settle.');
         } else if (what === 'nudge') {
             compass.nudge(arg);
@@ -104,7 +93,7 @@ const compass = createCompass(viewer, {
 });
 
 async function startCompass() {
-    if (!site) { ui.toast('Load a site first.'); return; }
+    if (!site) { ui.toast('Load a bridge first.'); return; }
     ui.setCompassState('waiting');
     const ok = await compass.start();
     if (!ok) ui.setCompassState('off');
@@ -115,35 +104,17 @@ function stopCompass() {
 }
 
 /* ------------------------------------------------------------------ *
- * Tap to select                                                       *
- * ------------------------------------------------------------------ */
-const canvas = viewer.canvas;
-let down = null;
-canvas.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY }; });
-canvas.addEventListener('pointerup', e => {
-    if (!down || !markers) return;
-    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-    down = null;
-    if (moved > 8) return;                       // that was an orbit drag
-
-    const visible = markers.pickables.filter(p => p.material.opacity > 0.5);
-    const hit = viewer.pick(e.clientX, e.clientY, visible)[0]
-             || viewer.pick(e.clientX, e.clientY, markers.bodyMeshes)[0];
-    select(hit ? (hit.object.userData.sensorId ?? null) : null, { fly: !!hit });
-});
-
-/* ------------------------------------------------------------------ *
  * Site loading                                                        *
  * ------------------------------------------------------------------ */
-async function loadSite(next, wantSensor = null) {
+async function loadSite(next, wantType = null) {
     if (loading || !next) return;
     loading = true;
 
-    markers?.dispose();
-    markers = null;
-    sensors = [];
-    selectedId = null;
-    filter = null;
+    highlighter?.dispose();
+    highlighter = null;
+    groups = null;
+    activeType = null;
+    ui.setActiveType(null);
     if (compass.active) stopCompass();
 
     ui.loader.show(next.name, `${next.code} · ${next.sizeMB} MB`);
@@ -157,22 +128,19 @@ async function loadSite(next, wantSensor = null) {
         store.set(LAST_SITE_KEY, site.code);
         compass.setSite(site.code, site.northOffsetDeg);
 
-        sensors = detectSensors(model);
-        markers = createMarkers(viewer, sensors, { onSelect: id => select(id, { fly: true }) });
+        groups = detectSensors(model);
+        highlighter = createHighlighter(viewer, groups);
 
-        ui.setSite(site, countByType(sensors));
-        ui.setSensors(sensors, model.center);
-        ui.setFilter(null);
+        ui.setSite(site);
+        ui.setTypes(SENSOR_TYPES.map(t => ({
+            key: t.key, label: t.label, css: t.css, count: groups[t.key].points.length,
+        })));
         ui.setTiltState(compass.tiltEnabled);
-        ui.setSheet('peek');
 
-        viewer.applyView('iso');
+        viewer.frameModel();
         ui.loader.hide();
 
-        if (!sensors.length) {
-            ui.toast('No sensor nodes found in this model — check the export.', 6000);
-        }
-        if (wantSensor) select(wantSensor, { fly: true });
+        if (wantType) selectType(wantType);
         else syncUrl();
     } catch (err) {
         console.error('[main] model load failed', err);
@@ -191,9 +159,20 @@ viewer.start();
 const params = new URLSearchParams(location.search);
 const initial = getSite(params.get('site')) || getSite(store.get(LAST_SITE_KEY));
 
+// Debug seam, off unless ?debug=1 is in the URL. Lets the test harness assert
+// on materials and layers, and is handy from the console in the field.
+if (params.has('debug')) {
+    window.__bwim = {
+        viewer,
+        get site() { return site; },
+        get groups() { return groups; },
+        get activeType() { return activeType; },
+    };
+}
+
 ui.buildPicker(SITES, initial?.code);
 if (initial) {
-    loadSite(initial, params.get('sensor'));
+    loadSite(initial, params.get('type'));
 } else {
     ui.loader.hide();
     ui.openPicker();

@@ -1,10 +1,10 @@
-# Bridge Sensor Inspector
+# BMA BWIM System
 
-A phone-first 3D viewer for locating installed monitoring hardware on site. Pick a site, see
-every LiDAR and camera highlighted on the structure, tap one for its exact position, and switch on
-compass mode so the model turns to face the same way you do.
+A phone-first 3D viewer for the bridge weigh-in-motion installations. Pick a bridge, pick a sensor
+type, and every unit of that type lights up on the model while the camera moves to a view that
+shows them — for weight sensors, that means going under the deck and looking up at the girders.
 
-It is a **viewer only** — it locates and identifies hardware. It records nothing.
+It shows where equipment is. It records nothing and reports no readings.
 
 ## Run it locally
 
@@ -42,35 +42,63 @@ Then **Settings ▸ Pages ▸ Deploy from a branch ▸ `main` / `(root)`**.
 Paths are **case-sensitive** on Pages but not on Windows, so `Model-glb/` must stay spelled exactly
 that way in `js/sites.js`.
 
-## Configuring sites
+## Configuring bridges
 
-Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per site:
+Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per bridge:
 
 | field | meaning |
 | --- | --- |
 | `name` | what the picker shows. Pre-filled with the code; **edit this**. Thai is fine. |
 | `file` | path to the GLB, case-sensitive |
-| `sizeMB`, `captured` | shown in the picker so an inspector knows what they are downloading |
+| `sizeMB`, `captured` | shown in the picker so you know what you are about to download |
 | `northOffsetDeg` | true bearing of the model's &minus;Z axis. `0` means "not surveyed" |
 
-Nothing else is per-site. Sensors are found in the model itself.
+Nothing else is per-bridge. Equipment is found in the model itself.
 
-## How sensors are found
+## The three sensor types
 
-Every GLB is a SimLab export carrying the same node names for the installed hardware
-(`TF03-100 LiDAR-R004` ×4, `AxisCam_Q16O#<n>` ×2). `js/sensors.js` walks the loaded scene and
-matches those names, then derives IDs, chainage and side from the model bounding box — so a
-re-export with hardware in new positions needs no code change.
+| Panel entry | What it is | How it is found |
+| --- | --- | --- |
+| **AXLE DETECTOR** | Benewake TF03-100 LiDAR, 4 per bridge | node named `TF03-100 LiDAR-R004` |
+| **CAMERA** | Axis Q16 series, 2 per bridge | node named `AxisCam_Q16O#<n>` |
+| **WEIGHT SENSOR** | strain plates on the girders, plus the uPVC conduit run that wires them | geometric, see below |
 
-Two details worth knowing if you touch that file:
+Three things worth knowing before editing `js/sensors.js`:
 
 - Node names are matched on a **punctuation-stripped key**. GLTFLoader rewrites names on import
   (`TF03-100 LiDAR-R004` arrives as `TF03-100_LiDAR-R004`), and the camera instance number differs
   per site (`#2` on four sites, `#3` on BRC).
-- **`260919_BKT.glb` has no camera geometry.** Its two `AxisCam` nodes are empty placeholders —
-  24 transform nodes, zero meshes — where the other four sites have 11 meshes each. The app copes:
-  markers hang off the node position, and the detail card says so. It is worth asking for a
-  re-export if the camera bodies are meant to be there.
+- **The strain gauges are not named.** Nothing in any of the five models is called "strain" or
+  "WeightSensor", so they are found by shape and position: ~150 mm plates with mounting studs, at
+  girder level, ~2 m apart across the deck, in two cross-sections near midspan. Every threshold
+  sits in the `STRAIN` block at the top of `js/sensors.js` — that is the one place to adjust if a
+  re-export moves things. Current results: 12 sensors on SSW, TPA and BRC, 16 on BKT, 14 on
+  PM1-BWK. Detection is logged to the console on every load, so it can be checked against the
+  model.
+  If a future export names the plates, replace the whole `findStrainPlates()` heuristic with a name
+  match like the other two types.
+- The **conduit** is the opposite — completely reliable. Every piece has `conduit upvc` in its node
+  name (195–328 meshes per model). The `VBO_Pipe` material only covers 5–19 fittings, so match on
+  the name, not the material.
+
+**`260919_BKT.glb` has no camera geometry.** Both of its `AxisCam` nodes are empty placeholders
+where the other four sites have 11 meshes each. Selecting CAMERA there flies to the mounting
+position, highlights nothing, and says so. Worth asking for a re-export if the camera bodies are
+meant to be there.
+
+## How highlighting works
+
+A 150 mm plate bolted to a girder web is invisible on a 130 m bridge from most angles, so:
+
+- Highlighted meshes swap to **one shared flat-colour material per type** and move to
+  `HIGHLIGHT_LAYER`. Swapping beats cloning — the weight group alone is 300–500 meshes, and the
+  whole model has only 12–18 materials, so cloning would tint the bridge.
+- Each frame draws the model on layer 0, a dim quad over it, then clears depth and draws layer 1.
+  Equipment buried inside the structure still reads.
+
+Axle detectors and cameras are physically small and spread far apart, so at a view that fits all of
+them they show as small bright marks rather than recognisable devices. Pinch to zoom in. The weight
+sensors read much better because sixteen of them plus the conduit form a visible line.
 
 ## Compass mode
 
@@ -89,10 +117,10 @@ Turns the view to follow the phone's heading.
    the view does not jump.
 2. If it is off, just **drag the view** until it matches what is in front of you — that
    re-calibrates. Or use the ±5° buttons.
-3. The offset is saved per site in the browser.
+3. The offset is saved per bridge in the browser.
 
-Once a site has been aligned on site, copy the "Model north offset" value the panel shows into that
-site's `northOffsetDeg` in `js/sites.js`, and every inspector gets it without calibrating.
+Once a bridge has been aligned on site, copy the "Model north offset" value the panel shows into
+that entry's `northOffsetDeg` in `js/sites.js`, and nobody has to calibrate it again.
 
 `Follow tilt` additionally pitches the view with the phone. It is off by default and is only
 accurate in portrait.
@@ -102,13 +130,13 @@ accurate in portrait.
 ```
 index.html          markup and the three.js import map
 css/app.css         mobile-first styling
-js/sites.js         the 5 sites - edit names and north offsets here
+js/sites.js         the 5 bridges - edit names and north offsets here
 js/main.js          boot and wiring
-js/viewer.js        renderer, scenes, camera, orbit, fly-to, focus dim
-js/sensors.js       detection from node names, markers, highlighting
+js/viewer.js        renderer, camera, orbit, fly-to, framing, highlight overlay pass
+js/sensors.js       equipment detection and highlighting
 js/compass.js       device orientation to camera heading, calibration
-js/ui.js            picker, chips, bottom sheet, detail card
-Model-glb/*.glb     the site models
+js/ui.js            side panel, bridge picker, loader, toast
+Model-glb/*.glb     the bridge models
 ```
 
 three.js is pinned to **0.163.0** in the import map. The materials declare
@@ -120,7 +148,10 @@ Rendering is on demand — the loop only draws when something moved. These model
 calls per frame, so that matters for phone battery. If a target phone still struggles, the next
 lever is a build-time `gltf-transform optimize` pass to produce smaller models.
 
-## Deep links
+## Links and debugging
 
-`?site=BKT` opens a site, `?site=BKT&sensor=LDR-03` opens it with that unit selected. The URL
+`?site=BKT` opens a bridge, `?site=BKT&type=weight` opens it with that type highlighted. The URL
 updates as you go, so it can be sent to someone else.
+
+`?debug=1` exposes `window.__bwim` with the viewer, the current site and the detected groups —
+useful for checking detection from the console on a real model.

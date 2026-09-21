@@ -2,12 +2,9 @@
  * All DOM wiring. The markup lives in index.html; this module fills it in and
  * turns interactions into callbacks for main.js.
  *
- * Every piece of site- or sensor-supplied text goes in through textContent, so
- * Thai site names (or anything else) render as written and can never be parsed
- * as markup.
+ * Every piece of site-supplied text goes in through textContent, so Thai bridge
+ * names render as written and can never be parsed as markup.
  */
-import { SENSOR_TYPES, cardinal, bearingOfModelDir } from './sensors.js';
-
 const $ = id => document.getElementById(id);
 
 function el(tag, props = {}, kids = []) {
@@ -22,29 +19,26 @@ function el(tag, props = {}, kids = []) {
     return n;
 }
 
+/** #rrggbb -> rgba(r,g,b,a), for the selected-entry tint without color-mix(). */
+function softColor(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
 export function createUI(handlers) {
     const dom = {
-        siteBtn: $('siteBtn'), siteName: $('siteName'), siteSub: $('siteSub'),
-        compassBtn: $('compassBtn'),
-        chips: $('chips'),
-        viewTools: $('viewTools'), toggleLabels: $('toggleLabels'), toggleFocus: $('toggleFocus'),
-        calib: $('calib'), calHeading: $('calHeading'), calNote: $('calNote'),
-        calAlign: $('calAlign'), calTilt: $('calTilt'), calReset: $('calReset'), calOffset: $('calOffset'),
-        sheet: $('sheet'), sheetGrip: $('sheetGrip'), sheetTitle: $('sheetTitle'), sheetSub: $('sheetSub'),
-        sheetBody: $('sheetBody'), sensorList: $('sensorList'), detail: $('detail'),
+        siteBtn: $('siteBtn'), siteName: $('siteName'), compassBtn: $('compassBtn'),
+        typeList: $('typeList'), overviewBtn: $('overviewBtn'),
+        calib: $('calib'), calHeading: $('calHeading'), calAlign: $('calAlign'),
+        calTilt: $('calTilt'), calReset: $('calReset'), calOffset: $('calOffset'),
         picker: $('picker'), siteList: $('siteList'), pickerClose: $('pickerClose'),
         loader: $('loader'), loadTitle: $('loadTitle'), loadSub: $('loadSub'),
         loadFill: $('loadFill'), loadPct: $('loadPct'), loadRetry: $('loadRetry'),
         toast: $('toast'),
     };
 
-    let sensors = [];
-    let filter = null;
-    let selectedId = null;
-    let northCtx = { northOffset: 0, northKnown: false, centre: null };
-
     /* ------------------------------------------------------------------ *
-     * Site picker                                                         *
+     * Bridge picker                                                       *
      * ------------------------------------------------------------------ */
     function buildPicker(sites, currentCode) {
         dom.siteList.replaceChildren(...sites.map(site => {
@@ -58,14 +52,10 @@ export function createUI(handlers) {
                     el('span', { class: 'd', text: `${site.captured} · ${site.sizeMB} MB` }),
                 ]),
             ]);
-            row.addEventListener('click', () => {
-                closePicker();
-                handlers.onChooseSite(site);
-            });
+            row.addEventListener('click', () => { closePicker(); handlers.onChooseSite(site); });
             return row;
         }));
     }
-
     const openPicker = () => dom.picker.classList.add('show');
     const closePicker = () => dom.picker.classList.remove('show');
 
@@ -73,219 +63,38 @@ export function createUI(handlers) {
     dom.pickerClose.addEventListener('click', closePicker);
 
     /* ------------------------------------------------------------------ *
-     * Type chips                                                          *
+     * Sensor types                                                        *
      * ------------------------------------------------------------------ */
-    function buildChips(counts) {
-        const total = Object.values(counts).reduce((a, b) => a + b, 0);
-        const defs = [
-            { key: null, label: 'All', sw: 'sw-all', n: total },
-            ...Object.values(SENSOR_TYPES)
-                .filter(t => counts[t.key] > 0)
-                .map(t => ({ key: t.key, label: t.label, sw: `sw-${t.key}`, n: counts[t.key] })),
-        ];
-        dom.chips.replaceChildren(...defs.map(d => {
-            const c = el('button', { class: 'chip', type: 'button' }, [
-                el('i', { class: `swatch ${d.sw}` }),
-                el('span', { text: d.label }),
-                el('span', { class: 'n', text: String(d.n) }),
-            ]);
-            c.setAttribute('aria-pressed', String(filter === d.key));
-            c.dataset.type = d.key ?? '';
-            c.addEventListener('click', () => handlers.onFilter(d.key));
-            return c;
-        }));
-    }
+    let activeType = null;
 
-    function setFilter(type) {
-        filter = type || null;
-        for (const c of dom.chips.children) {
-            c.setAttribute('aria-pressed', String((c.dataset.type || null) === filter));
-        }
-        renderList();
-    }
-
-    /* ------------------------------------------------------------------ *
-     * Sensor list + detail                                                *
-     * ------------------------------------------------------------------ */
-    function renderList() {
-        const shown = sensors.filter(s => !filter || s.type === filter);
-        dom.sheetSub.textContent = shown.length === sensors.length
-            ? `${sensors.length} installed`
-            : `${shown.length} of ${sensors.length}`;
-
-        const frag = document.createDocumentFragment();
-        for (const type of Object.values(SENSOR_TYPES)) {
-            const group = shown.filter(s => s.type === type.key);
-            if (!group.length) continue;
-            frag.appendChild(el('div', { class: 'group-label', text: `${type.plural} (${group.length})` }));
-            for (const s of group) {
-                const row = el('div', { class: 'srow' + (s.id === selectedId ? ' selected' : '') }, [
-                    el('i', { class: 'pip' }),
-                    el('span', { class: 'txt' }, [
-                        el('span', { class: 'id', text: s.id }),
-                        el('span', { class: 'loc', text: s.location }),
-                    ]),
-                    el('span', { class: 'go', text: '›' }),
-                ]);
-                row.firstChild.style.background = type.css;
-                row.addEventListener('click', () => handlers.onSelectSensor(s.id));
-                frag.appendChild(row);
-            }
-        }
-        dom.sensorList.replaceChildren(frag);
-    }
-
-    function renderDetail(s) {
-        if (!s) { dom.detail.classList.remove('show'); dom.detail.replaceChildren(); return; }
-        const t = s.typeDef;
-
-        const rows = [
-            ['Model', t.model],
-            ['Position (x, y, z)', s.position.toArray().map(n => n.toFixed(2)).join(', ')],
-            ['Chainage', `${s.chainage.toFixed(1)} m`],
-            ['Side', s.side],
-            ['Height above base', `${s.height.toFixed(2)} m`],
-            ...t.spec,
-        ];
-
-        // Direction to walk from the middle of the structure - only meaningful
-        // once the compass has been aligned for this site.
-        if (northCtx.northKnown && northCtx.centre) {
-            const dx = s.position.x - northCtx.centre.x;
-            const dz = s.position.z - northCtx.centre.z;
-            if (Math.hypot(dx, dz) > 0.5) {
-                const b = bearingOfModelDir(dx, dz, northCtx.northOffset);
-                rows.push(['From site centre', `${cardinal(b)} · ${b.toFixed(0)}°`]);
-            }
-        }
-
-        const dl = el('dl', { class: 'dgrid' });
-        for (const [k, v] of rows) {
-            dl.appendChild(el('dt', { text: k }));
-            dl.appendChild(el('dd', { text: v }));
-        }
-
-        const close = el('button', { class: 'x', type: 'button', 'aria-label': 'Close', text: '×' });
-        close.addEventListener('click', () => handlers.onSelectSensor(null));
-
-        const locate = el('button', { class: 'btn small', type: 'button', text: 'Fly to' });
-        locate.addEventListener('click', () => handlers.onLocate(s.id));
-
-        const card = el('div', { class: 'dcard' }, [
-            el('div', { class: 'dhead' }, [
-                el('div', {}, [
-                    el('div', { class: 'dtitle', text: s.id }),
-                    el('div', { class: 'dsub wrap-any', text: s.location }),
+    function setTypes(entries) {
+        dom.typeList.replaceChildren(...entries.map(e => {
+            const node = el('button', {
+                class: 'type', type: 'button', 'data-type': e.key, 'aria-pressed': 'false',
+            }, [
+                el('i', { class: 'bar' }),
+                el('span', { class: 't' }, [
+                    el('span', { class: 'tl', text: e.label }),
+                    el('span', { class: 'tn', text: e.count === 1 ? '1 unit' : `${e.count} units` }),
                 ]),
-                close,
-            ]),
-            el('span', { class: `tag ${s.type}`, text: t.label }),
-            dl,
-            el('div', { class: 'dactions' }, [locate]),
-        ]);
-
-        if (!s.hasGeometry) {
-            card.appendChild(el('div', {
-                class: 'note warn',
-                text: 'This unit has no 3D geometry in the model file — the marker shows its '
-                    + 'designed position, but there is nothing to see here in the model.',
-            }));
-        }
-
-        dom.detail.replaceChildren(card);
-        dom.detail.classList.add('show');
+            ]);
+            node.style.setProperty('--c', e.css);
+            node.style.setProperty('--c-soft', softColor(e.css, 0.18));
+            // Tapping the selected type again clears it.
+            node.addEventListener('click', () => handlers.onSelectType(activeType === e.key ? null : e.key));
+            return node;
+        }));
+        setActiveType(activeType);
     }
 
-    function setSelected(id) {
-        selectedId = id || null;
-        renderList();
-        renderDetail(sensors.find(s => s.id === selectedId) || null);
-        if (selectedId) {
-            setSheet('half');
-            dom.sheetBody.scrollTop = 0;
+    function setActiveType(k) {
+        activeType = k || null;
+        for (const node of dom.typeList.children) {
+            node.setAttribute('aria-pressed', String(node.dataset.type === activeType));
         }
     }
 
-    /* ------------------------------------------------------------------ *
-     * Bottom sheet                                                        *
-     * ------------------------------------------------------------------ */
-    const SHEET_STATES = ['peek', 'half', 'full'];
-    let sheetState = 'peek';
-
-    function sheetY(state) {
-        const h = dom.sheet.offsetHeight;
-        if (state === 'full') return 0;
-        if (state === 'half') return Math.round(innerHeight * 0.37);
-        return Math.max(0, h - 168);
-    }
-
-    function setSheet(state) {
-        sheetState = state;
-        dom.sheet.style.transform = '';
-        dom.sheet.classList.remove('half', 'full', 'dragging');
-        if (state !== 'peek') dom.sheet.classList.add(state);
-    }
-
-    // Drag the grip / header to move between the three stops. Move and release
-    // are tracked on the document so a fast drag that leaves the grip still ends
-    // cleanly.
-    let drag = null;
-    function dragStart(e) {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        drag = { y0: e.clientY, base: sheetY(sheetState), moved: false };
-        dom.sheet.classList.add('dragging');
-    }
-    function dragMove(e) {
-        if (!drag) return;
-        const dy = e.clientY - drag.y0;
-        if (Math.abs(dy) > 4) drag.moved = true;
-        const y = Math.min(sheetY('peek'), Math.max(0, drag.base + dy));
-        dom.sheet.style.transform = `translateY(${y}px)`;
-    }
-    function dragEnd(e) {
-        if (!drag) return;
-        const wasDrag = drag.moved;
-        const y = Math.min(sheetY('peek'), Math.max(0, drag.base + (e.clientY - drag.y0)));
-        drag = null;
-        dom.sheet.classList.remove('dragging');
-        dom.sheet.style.transform = '';
-        if (!wasDrag) {
-            // A tap cycles peek -> half -> full -> peek.
-            setSheet(SHEET_STATES[(SHEET_STATES.indexOf(sheetState) + 1) % SHEET_STATES.length]);
-            return;
-        }
-        let best = 'peek', bestD = Infinity;
-        for (const s of SHEET_STATES) {
-            const d = Math.abs(sheetY(s) - y);
-            if (d < bestD) { bestD = d; best = s; }
-        }
-        setSheet(best);
-    }
-    for (const node of [dom.sheetGrip, $('sheetHead')]) {
-        node.addEventListener('pointerdown', dragStart);
-    }
-    document.addEventListener('pointermove', dragMove);
-    document.addEventListener('pointerup', dragEnd);
-    document.addEventListener('pointercancel', dragEnd);
-
-    /* ------------------------------------------------------------------ *
-     * View tools                                                          *
-     * ------------------------------------------------------------------ */
-    dom.viewTools.querySelectorAll('[data-view]').forEach(b => {
-        b.addEventListener('click', () => handlers.onView(b.dataset.view));
-    });
-    dom.toggleLabels.addEventListener('click', () => {
-        const hidden = document.body.classList.toggle('no-labels');
-        dom.toggleLabels.classList.toggle('active', !hidden);
-        dom.toggleLabels.setAttribute('aria-pressed', String(!hidden));
-        handlers.onInvalidate();
-    });
-    dom.toggleFocus.addEventListener('click', () => {
-        const on = !dom.toggleFocus.classList.contains('active');
-        dom.toggleFocus.classList.toggle('active', on);
-        dom.toggleFocus.setAttribute('aria-pressed', String(on));
-        handlers.onFocusDim(on);
-    });
+    dom.overviewBtn.addEventListener('click', () => handlers.onOverview());
 
     /* ------------------------------------------------------------------ *
      * Compass                                                             *
@@ -297,6 +106,10 @@ export function createUI(handlers) {
     dom.calib.querySelectorAll('[data-nudge]').forEach(b => {
         b.addEventListener('click', () => handlers.onCalibrate('nudge', Number(b.dataset.nudge)));
     });
+
+    const COMPASS_16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                        'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const cardinal = deg => COMPASS_16[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
 
     const COMPASS_MESSAGES = {
         insecure: 'Compass needs an https:// page. Over plain http it is blocked by the browser, '
@@ -317,11 +130,9 @@ export function createUI(handlers) {
         if (reading) setCompassReading(reading);
     }
 
-    function setCompassReading({ heading, northOffset, active }) {
-        northCtx.northOffset = northOffset;
-        northCtx.northKnown = active && heading != null;
+    function setCompassReading({ heading, northOffset }) {
         dom.calHeading.textContent = heading == null ? '–' : `${cardinal(heading)} ${heading.toFixed(0)}°`;
-        dom.calOffset.textContent = `Model north offset ${northOffset.toFixed(0)}° · saved for this site`;
+        dom.calOffset.textContent = `Model north offset ${northOffset.toFixed(0)}° · saved for this bridge`;
     }
 
     function setTiltState(on) {
@@ -363,7 +174,7 @@ export function createUI(handlers) {
     dom.loadRetry.addEventListener('click', () => { loader.hide(); handlers.onOpenPicker(); });
 
     let toastTimer = null;
-    function toast(msg, ms = 2600) {
+    function toast(msg, ms = 2800) {
         dom.toast.textContent = msg;
         dom.toast.classList.add('show');
         clearTimeout(toastTimer);
@@ -373,20 +184,8 @@ export function createUI(handlers) {
     /* ------------------------------------------------------------------ */
     return {
         buildPicker, openPicker, closePicker,
-        setSite(site, counts) {
-            dom.siteName.textContent = site.name;
-            dom.siteSub.textContent = `${site.code} · captured ${site.captured}`;
-            dom.sheetTitle.textContent = 'Sensors';
-            buildChips(counts);
-        },
-        setSensors(list, centre) {
-            sensors = list;
-            northCtx.centre = centre;
-            selectedId = null;
-            renderDetail(null);
-            renderList();
-        },
-        setFilter, setSelected, setSheet,
+        setSite(site) { dom.siteName.textContent = site.name; },
+        setTypes, setActiveType,
         setCompassState, setCompassReading, setTiltState,
         loader, toast,
     };

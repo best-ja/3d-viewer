@@ -4,11 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#060912">
-    <meta name="description" content="On-site reference for locating installed monitoring hardware on bridge structures.">
+    <meta name="description" content="Bridge weigh-in-motion equipment locations by site.">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>Bridge Sensor Inspector</title>
+    <title>BMA BWIM System</title>
     <link rel="stylesheet" href="css/app.css">
     <!--
       three.js is pinned to 0.163.0 on purpose. The models declare
@@ -28,28 +28,29 @@
 </head>
 <body>
     <canvas id="scene"></canvas>
-    <div id="labels"></div>
 
     <header id="topbar" class="panel">
+        <span class="brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</span>
         <button id="siteBtn" class="btn" aria-haspopup="dialog">
-            <span class="st">
-                <span class="nm wrap-any" id="siteName">Bridge Sensor Inspector</span>
-                <span class="sb" id="siteSub">Choose a site</span>
-            </span>
+            <span class="nm wrap-any" id="siteName">Site</span>
             <span class="caret" aria-hidden="true">&#9662;</span>
         </button>
         <button id="compassBtn" class="btn" aria-pressed="false"
                 title="Turn the view to face the same way as the phone">Compass</button>
     </header>
 
-    <div id="chips" role="group" aria-label="Filter by sensor type"></div>
+    <aside id="sidePanel" class="panel" aria-label="Sensor types">
+        <div class="sp-head">Sensor type</div>
+        <div id="typeList"></div>
+        <button class="btn" id="overviewBtn">Overview</button>
+    </aside>
 
     <section id="calib" class="panel" aria-label="Compass alignment">
         <div class="ch">
             <span>Compass</span>
             <span class="hdg" id="calHeading">&ndash;</span>
         </div>
-        <div class="cnote" id="calNote">
+        <div class="cnote">
             Drag the view until it matches what is in front of you &mdash; the alignment is saved for this site.
         </div>
         <div class="crow">
@@ -64,38 +65,19 @@
         <div class="off" id="calOffset"></div>
     </section>
 
-    <section id="sheet" aria-label="Sensors">
-        <div id="sheetGrip"><i></i></div>
-        <div id="sheetHead">
-            <b id="sheetTitle">Sensors</b>
-            <span id="sheetSub"></span>
-        </div>
-        <nav id="viewTools" aria-label="View presets">
-            <button class="btn small" data-view="iso">Iso</button>
-            <button class="btn small" data-view="top">Top</button>
-            <button class="btn small" data-view="elev">Side</button>
-            <button class="btn small active" id="toggleLabels" aria-pressed="true">Tags</button>
-            <button class="btn small" id="toggleFocus" aria-pressed="false">Focus</button>
-        </nav>
-        <div id="sheetBody">
-            <div id="detail"></div>
-            <div id="sensorList"></div>
-        </div>
-    </section>
-
-    <div id="picker" role="dialog" aria-modal="true" aria-label="Choose site">
-        <h2>Choose site</h2>
-        <div class="ph">Tap a site to load its model.</div>
+    <div id="picker" role="dialog" aria-modal="true" aria-label="Choose bridge">
+        <h2>Choose bridge</h2>
+        <div class="ph">Tap a bridge to load its model.</div>
         <div class="list" id="siteList"></div>
         <button class="btn" id="pickerClose">Close</button>
     </div>
 
     <div id="loader">
-        <div class="lt" id="loadTitle">Bridge Sensor Inspector</div>
+        <div class="lt" id="loadTitle">BMA BWIM System</div>
         <div class="ls" id="loadSub">Starting&hellip;</div>
         <div class="bar"><div class="fill" id="loadFill"></div></div>
         <div class="pct" id="loadPct">0%</div>
-        <button class="btn" id="loadRetry" hidden>Choose another site</button>
+        <button class="btn" id="loadRetry" hidden>Choose another bridge</button>
     </div>
 
     <div id="toast" role="status" aria-live="polite"></div>

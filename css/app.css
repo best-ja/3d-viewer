@@ -1,5 +1,5 @@
 /* ============================================================
-   Bridge Sensor Inspector - mobile-first stylesheet
+   BMA BWIM System - stylesheet
    Dark UI sitting on top of the 3D scene, high contrast so it
    stays readable on a phone outdoors.
    ============================================================ */
@@ -11,12 +11,9 @@
     --text:      #f1f5f9;
     --dim:       #94a3b8;
     --accent:    #38bdf8;
-    --lidar:     #22d3ee;
-    --camera:    #c084fc;
-    --ok:        #22c55e;
     --danger:    #ef4444;
 
-    /* Thai faces first so site names render with no network on site. */
+    /* Thai faces first so bridge names render with no network on site. */
     --font: "Noto Sans Thai", "Sarabun", "Leelawadee UI", "Thonburi",
             system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
@@ -25,8 +22,10 @@
     --sal: env(safe-area-inset-left, 0px);
     --sar: env(safe-area-inset-right, 0px);
 
-    --tap: 44px;   /* minimum touch target */
+    --tap: 44px;    /* minimum touch target */
+    --panel-w: 140px;
 }
+@media (min-width: 720px) { :root { --panel-w: 224px; } }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -45,33 +44,12 @@ body {
 /* Thai has no word spaces, so long names need an explicit break rule. */
 .wrap-any { overflow-wrap: anywhere; word-break: break-word; }
 
-/* ---------- 3D canvas + CSS2D label layer ---------- */
 #scene {
     position: fixed; inset: 0; z-index: 0; display: block;
     width: 100vw; height: 100vh;
     touch-action: none;                      /* OrbitControls handles gestures */
     background: radial-gradient(circle at 50% 18%, #1e293b 0%, #0b1120 68%, #060912 100%);
 }
-#labels { position: fixed; inset: 0; z-index: 5; pointer-events: none; overflow: hidden; }
-
-.marker-label {
-    position: absolute;
-    background: rgba(6, 9, 18, 0.88);
-    border: 1px solid var(--border);
-    color: #fff;
-    font: 600 12px/1.2 var(--font);
-    padding: 4px 9px; border-radius: 999px;
-    white-space: nowrap; user-select: none; cursor: pointer;
-    pointer-events: auto;
-    /* No transform here: CSS2DRenderer writes an inline transform every frame
-       and would override it. The label is lifted clear of its ring in 3D
-       instead - see createMarkers() in js/sensors.js. */
-}
-.marker-label.lidar    { border-color: var(--lidar);  color: #cffafe; }
-.marker-label.camera   { border-color: var(--camera); color: #f3e8ff; }
-.marker-label.selected { background: var(--accent); color: #04121c; border-color: #fff; }
-.marker-label.muted    { opacity: 0.28; }
-body.no-labels .marker-label { display: none; }
 
 /* ---------- shared surfaces ---------- */
 .panel {
@@ -85,157 +63,96 @@ body.no-labels .marker-label { display: none; }
     appearance: none; border: 1px solid var(--border);
     background: var(--panel-2); color: var(--text);
     font: 600 13px/1.3 var(--font);
-    min-height: var(--tap); padding: 9px 14px;
+    min-height: var(--tap); padding: 9px 13px;
     border-radius: 11px; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
 }
-.btn:active  { background: rgba(148, 163, 184, 0.28); }
-.btn.active  { background: rgba(56, 189, 248, 0.22); border-color: var(--accent); color: #e0f2fe; }
-.btn.small   { min-height: 36px; padding: 6px 11px; font-size: 12px; border-radius: 9px; }
+.btn:active { background: rgba(148, 163, 184, 0.28); }
+.btn.active { background: rgba(56, 189, 248, 0.22); border-color: var(--accent); color: #e0f2fe; }
+.btn.small  { min-height: 36px; padding: 6px 10px; font-size: 12px; border-radius: 9px; }
 .btn[disabled] { opacity: 0.4; pointer-events: none; }
 
 /* ---------- top bar ---------- */
 #topbar {
-    position: fixed; z-index: 20;
+    position: fixed; z-index: 30;
     top: calc(var(--sat) + 8px);
     left: calc(var(--sal) + 8px); right: calc(var(--sar) + 8px);
     display: flex; align-items: center; gap: 8px;
-    padding: 7px 8px;
+    padding: 7px 8px 7px 12px;
 }
+#topbar .brand {
+    flex: 0 1 auto; min-width: 0;
+    font-size: 13px; font-weight: 500; letter-spacing: 0.4px;
+    color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#topbar .brand b { color: var(--text); font-weight: 800; letter-spacing: 0.6px; }
 #siteBtn {
-    flex: 1 1 auto; min-width: 0; justify-content: flex-start;
-    background: transparent; border-color: transparent; text-align: left;
+    flex: 1 1 auto; min-width: 0; margin-left: auto;
+    justify-content: flex-end; gap: 6px;
+    background: transparent; border-color: transparent;
 }
-#siteBtn .st { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
-#siteBtn .nm { font-size: 15px; font-weight: 700; line-height: 1.5; }
-#siteBtn .sb { font-size: 11px; font-weight: 500; color: var(--dim); line-height: 1.4; }
-#siteBtn .caret { margin-left: auto; color: var(--dim); font-size: 12px; flex: 0 0 auto; }
+#siteBtn .nm { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#siteBtn .caret { color: var(--dim); font-size: 11px; flex: 0 0 auto; }
+#compassBtn { flex: 0 0 auto; font-size: 12px; padding: 9px 11px; }
 
-/* ---------- sensor-type chips ---------- */
-#chips {
-    position: fixed; z-index: 20;
-    top: calc(var(--sat) + 74px);
-    left: calc(var(--sal) + 8px); right: calc(var(--sar) + 8px);
-    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px;
-    scrollbar-width: none;
-}
-#chips::-webkit-scrollbar { display: none; }
-.chip {
-    flex: 0 0 auto;
-    display: inline-flex; align-items: center; gap: 7px;
-    min-height: 38px; padding: 6px 14px;
-    border: 1px solid var(--border); border-radius: 999px;
-    background: var(--panel);
-    font: 600 13px/1.3 var(--font); color: var(--text);
-    cursor: pointer; white-space: nowrap;
-}
-.chip .swatch { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
-.chip .n { color: var(--dim); font-weight: 500; }
-.chip[aria-pressed="true"] { background: rgba(56, 189, 248, 0.2); border-color: var(--accent); }
-.chip[aria-pressed="true"] .n { color: #bae6fd; }
-.sw-lidar  { background: var(--lidar); }
-.sw-camera { background: var(--camera); }
-.sw-all    { background: linear-gradient(135deg, var(--lidar), var(--camera)); }
-
-/* ---------- view tools ----------
-   Inside the sheet, under the header: always visible at the peek stop, within
-   thumb reach, and impossible for the sheet to clip. */
-#viewTools {
-    flex: 0 0 auto;
-    display: flex; gap: 7px; overflow-x: auto;
-    padding: 9px 14px 10px;
-    border-bottom: 1px solid var(--border);
-    scrollbar-width: none;
-    touch-action: pan-x;     /* the sheet sets none; this row still scrolls */
-}
-#viewTools::-webkit-scrollbar { display: none; }
-#viewTools .btn { flex: 0 0 auto; min-width: 58px; }
-
-/* ---------- bottom sheet ---------- */
-#sheet {
+/* ---------- sensor-type side panel ---------- */
+#sidePanel {
     position: fixed; z-index: 25;
-    left: 0; right: 0; bottom: 0;
-    --peek: 168px;
-    height: 74vh;
-    background: var(--panel);
-    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-    border-top: 1px solid var(--border);
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.55);
-    display: flex; flex-direction: column;
-    transform: translateY(calc(74vh - var(--peek)));
-    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
-    touch-action: none;
+    left: calc(var(--sal) + 8px);
+    top: calc(var(--sat) + 70px);
+    width: var(--panel-w);
+    max-height: calc(100vh - var(--sat) - var(--sab) - 92px);
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 10px;
+    overflow-y: auto;
 }
-#sheet.half { transform: translateY(36vh); }
-#sheet.full { transform: translateY(0); }
-#sheet.dragging { transition: none; }
+.sp-head {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
+    color: var(--dim); padding: 0 2px 2px;
+}
+#typeList { display: flex; flex-direction: column; gap: 7px; }
 
-#sheetGrip { padding: 8px 0 4px; display: flex; justify-content: center; cursor: grab; flex: 0 0 auto; }
-#sheetGrip i { display: block; width: 42px; height: 4px; border-radius: 999px; background: rgba(148, 163, 184, 0.5); }
+.type {
+    appearance: none; cursor: pointer; text-align: left;
+    display: flex; align-items: stretch; gap: 9px;
+    width: 100%; min-height: 52px; padding: 8px 9px;
+    border: 1px solid var(--border); border-radius: 11px;
+    background: rgba(2, 6, 14, 0.45);
+    color: var(--text); font-family: var(--font);
+}
+.type:active { background: rgba(148, 163, 184, 0.16); }
+.type .bar { flex: 0 0 4px; border-radius: 999px; background: var(--c); }
+.type .t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.type .tl { font-size: 11.5px; font-weight: 700; line-height: 1.25; letter-spacing: 0.2px; }
+.type .tn { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.type[aria-pressed="true"] {
+    background: var(--c-soft);
+    border-color: var(--c);
+}
+.type[aria-pressed="true"] .tl { color: var(--c); }
+.type[aria-pressed="true"] .tn { color: var(--text); }
 
-#sheetHead {
-    flex: 0 0 auto;
-    display: flex; align-items: center; gap: 10px;
-    padding: 2px 16px 10px;
-    font-size: 12px; color: var(--dim);
-    border-bottom: 1px solid var(--border);
-}
-#sheetHead b { color: var(--text); font-size: 13px; }
-#sheetBody {
-    flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch;
-    padding: 6px 10px calc(var(--sab) + 18px);
-    touch-action: pan-y;
-}
+#overviewBtn { margin-top: 2px; min-height: 38px; font-size: 12px; }
 
-/* sensor rows */
-.srow {
-    display: flex; align-items: center; gap: 11px;
-    padding: 11px 12px; margin: 4px 0;
-    border: 1px solid transparent; border-radius: 12px;
-    min-height: var(--tap); cursor: pointer;
+/* ---------- compass calibration ---------- */
+#calib {
+    position: fixed; z-index: 28;
+    left: calc(var(--sal) + var(--panel-w) + 16px);
+    right: calc(var(--sar) + 8px);
+    bottom: calc(var(--sab) + 8px);
+    max-width: 380px;
+    padding: 13px; display: none;
 }
-.srow:active { background: rgba(148, 163, 184, 0.1); }
-.srow.selected { background: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.5); }
-.srow .pip { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; }
-.srow .txt { flex: 1 1 auto; min-width: 0; }
-.srow .id  { font-size: 14px; font-weight: 700; }
-.srow .loc { font-size: 11.5px; color: var(--dim); }
-.srow .go  { color: var(--dim); font-size: 16px; flex: 0 0 auto; }
+#calib.show { display: block; }
+#calib .ch { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; }
+#calib .ch .hdg { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-size: 15px; }
+#calib .cnote { font-size: 11.5px; color: var(--dim); margin: 7px 0 9px; }
+#calib .crow { display: flex; gap: 7px; align-items: center; }
+#calib .crow .btn { flex: 1; }
+#calib .crow .nudge { flex: 0 0 auto; width: 52px; }
+#calib .off { font-size: 11.5px; color: var(--dim); margin-top: 8px; text-align: center; font-variant-numeric: tabular-nums; }
 
-.group-label {
-    font-size: 11px; letter-spacing: 0.7px; text-transform: uppercase;
-    color: var(--dim); padding: 12px 12px 4px;
-}
-
-/* detail card */
-#detail { display: none; padding: 4px 4px 0; }
-#detail.show { display: block; }
-.dcard { border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: rgba(2, 6, 14, 0.5); }
-.dcard .dhead { display: flex; align-items: flex-start; gap: 10px; }
-.dcard .dtitle { font-size: 17px; font-weight: 700; }
-.dcard .dsub { font-size: 12px; color: var(--dim); margin-top: 1px; }
-.dcard .x {
-    margin-left: auto; background: none; border: none; color: var(--dim);
-    font-size: 22px; line-height: 1; padding: 0 6px; cursor: pointer; min-height: var(--tap);
-}
-.tag {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 10px; border-radius: 999px;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
-    margin-top: 8px;
-}
-.tag.lidar  { background: rgba(34, 211, 238, 0.16); color: #a5f3fc; }
-.tag.camera { background: rgba(192, 132, 252, 0.16); color: #e9d5ff; }
-.dgrid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px; margin-top: 12px; }
-.dgrid dt { color: var(--dim); }
-.dgrid dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.dactions { display: flex; gap: 8px; margin-top: 14px; }
-.dactions .btn { flex: 1; }
-.note { font-size: 11.5px; color: var(--dim); margin-top: 10px; }
-.note.warn { color: #fcd34d; }
-
-/* ---------- site picker ---------- */
+/* ---------- bridge picker ---------- */
 #picker {
     position: fixed; inset: 0; z-index: 60;
     background: rgba(3, 6, 14, 0.9);
@@ -268,22 +185,6 @@ body.no-labels .marker-label { display: none; }
 .site-row .meta .d { font-size: 11.5px; color: var(--dim); }
 #pickerClose { margin-top: 12px; }
 
-/* ---------- compass calibration ---------- */
-#calib {
-    position: fixed; z-index: 40;
-    left: calc(var(--sal) + 8px); right: calc(var(--sar) + 8px);
-    top: calc(var(--sat) + 122px);
-    padding: 14px; display: none;
-}
-#calib.show { display: block; }
-#calib .ch { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; }
-#calib .ch .hdg { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-size: 15px; }
-#calib .cnote { font-size: 11.5px; color: var(--dim); margin: 8px 0 10px; }
-#calib .crow { display: flex; gap: 8px; align-items: center; }
-#calib .crow .btn { flex: 1; }
-#calib .crow .nudge { flex: 0 0 auto; width: 54px; }
-#calib .off { font-size: 12px; color: var(--dim); margin-top: 9px; text-align: center; font-variant-numeric: tabular-nums; }
-
 /* ---------- loader ---------- */
 #loader {
     position: fixed; inset: 0; z-index: 70;
@@ -303,31 +204,19 @@ body.no-labels .marker-label { display: none; }
 /* ---------- toast ---------- */
 #toast {
     position: fixed; z-index: 80;
-    left: 50%; bottom: calc(var(--sab) + 152px);
-    transform: translate(-50%, 12px);
-    max-width: min(420px, 90vw);
+    left: calc(var(--sal) + var(--panel-w) + 16px);
+    right: calc(var(--sar) + 8px);
+    bottom: calc(var(--sab) + 12px);
+    margin: 0 auto; max-width: 420px;
     padding: 11px 16px; border-radius: 12px;
     background: rgba(2, 6, 14, 0.95); border: 1px solid var(--border);
     font-size: 12.5px; text-align: center;
     opacity: 0; pointer-events: none;
+    transform: translateY(10px);
     transition: opacity 0.25s, transform 0.25s;
 }
-#toast.show { opacity: 1; transform: translate(-50%, 0); }
-
-/* ---------- wider screens: the sheet becomes a side panel ---------- */
-@media (min-width: 820px) {
-    #sheet {
-        left: auto; right: calc(var(--sar) + 12px);
-        bottom: calc(var(--sab) + 12px);
-        top: calc(var(--sat) + 122px);
-        width: 360px; height: auto;
-        border-radius: 16px; border: 1px solid var(--border);
-        transform: none !important;
-    }
-    #sheetGrip { display: none; }
-    #calib { left: calc(var(--sal) + 12px); right: auto; width: 340px; }
-}
+#toast.show { opacity: 1; transform: translateY(0); }
 
 @media (prefers-reduced-motion: reduce) {
-    #sheet, #toast, #loader { transition: none; }
+    #toast, #loader { transition: none; }
 }
