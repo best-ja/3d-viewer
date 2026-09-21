@@ -4,7 +4,14 @@
  * Deep links: ?site=BKT, optionally &type=axle and &unit=axle-2, so a view can
  * be sent to someone else as a plain URL.
  */
-import { SITES, getSite } from './sites.js';
+/**
+ * js/sites.js is the one file that gets edited between reloads, so it is
+ * imported with a cache-busting query instead of being left to the browser's
+ * module cache. An ordinary reload happily serves a stale copy of it - and on
+ * iOS Safari there is no hard reload at all - which looks exactly like the
+ * setting being ignored. It is 4 KB next to a 10 MB model, so this is free.
+ */
+const { SITES, getSite } = await import(`./sites.js?t=${Date.now()}`);
 import { createViewer } from './viewer.js';
 import { detectSensors, detectPiers, detectNorth, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
 import { createCompass } from './compass.js';
@@ -204,6 +211,14 @@ async function loadSite(next, want = {}) {
         site = next;
         store.set(LAST_SITE_KEY, site.code);
 
+        // Name the settings that were read, so a config that did not reach the
+        // browser is visible at a glance rather than looking like the app
+        // ignoring it.
+        const cfg = [...Object.keys(site.unitLabels || {}).map(k => `unitLabels.${k}`),
+                     ...Object.keys(site.views || {}).map(k => `views.${k}`)];
+        console.log(`[config] ${site.code} from js/sites.js - `
+            + (cfg.length ? cfg.join(', ') : 'nothing configured'));
+
         // A model that carries an N/E/S/W compass rose already knows which way
         // it faces, so there is nothing for the inspector to calibrate.
         const north = detectNorth(model);
@@ -272,6 +287,10 @@ window.bwimView = () => {
 if (params.has('debug')) {
     window.__bwim = {
         viewer,
+        // The app holds its own instance of js/sites.js (cache-busted above), so
+        // the seam hands out that one - importing the module again would give a
+        // second copy whose edits go nowhere.
+        SITES,
         get site() { return site; },
         get groups() { return groups; },
         get selection() { return selection; },

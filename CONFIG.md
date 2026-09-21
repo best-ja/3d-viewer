@@ -189,6 +189,28 @@ Reload. CAM-01 now opens at that view every time, on every phone.
 
 Open the console — the app says what it did.
 
+### "I changed it and nothing happened"
+
+Reload and read the first two console lines. Every load prints what it read out of
+`js/sites.js`:
+
+```
+[config] BRC from js/sites.js — unitLabels.axle, views.cabinet
+```
+
+If your setting is not named there, the browser never saw your edit — check you saved the
+file, and that the `views` block is inside the right bridge's `{ ... }`.
+
+Then tap the sensor and read the view line. A shot taken from your config says so:
+
+```
+[view] cabinet (configured: azimuth, elevation, distance) — azimuth 90°, elevation -12°, distance 12.0 m
+```
+
+Without the `(configured: ...)` part the app chose the angle itself, which means no entry
+matched. For one sensor, the key must be the name **exactly** as the panel shows it.
+
+
 | message | what it means |
 | --- | --- |
 | `[labels] BKT.unitLabels.axle has 3 name(s) but 4 unit(s) were detected - ignoring it` | The list length must match exactly. Nothing is renamed until it does. |

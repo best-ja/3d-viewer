@@ -328,7 +328,9 @@ export function createViewer({ canvas, labelsEl }) {
         const auto = eyeAt(0, 1).sub(target);
         const autoDist = auto.length();
         const base = {
-            azimuth: THREE.MathUtils.radToDeg(Math.atan2(auto.x, -auto.z)),
+            // 0..360, matching anglesFromEye - this is the number that gets
+            // read off the log and pasted into js/sites.js.
+            azimuth: (THREE.MathUtils.radToDeg(Math.atan2(auto.x, -auto.z)) + 360) % 360,
             elevation: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(auto.y / autoDist, -1, 1))),
             distance: autoDist,
         };
@@ -373,7 +375,9 @@ export function createViewer({ canvas, labelsEl }) {
             }
             shot = anglesFromEye(target, eye);
         }
-        console.log(`[view] ${label || mode} — azimuth ${shot.azimuth.toFixed(0)}°, `
+        const how = pinned.length ? ` (configured: ${pinned.join(', ')})`
+                  : (view?.flip ? ' (flipped)' : '');
+        console.log(`[view] ${label || mode}${how} — azimuth ${shot.azimuth.toFixed(0)}°, `
             + `elevation ${shot.elevation.toFixed(0)}°, distance ${shot.distance.toFixed(1)} m`);
         flyTo(eye, target);
     }
