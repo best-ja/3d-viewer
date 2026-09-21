@@ -3,9 +3,10 @@
  * turns interactions into callbacks for main.js.
  *
  * Every piece of site-supplied text goes in through textContent, so Thai bridge
- * names render as written and can never be parsed as markup.
+ * and pier names render as written and can never be parsed as markup.
  */
 const $ = id => document.getElementById(id);
+const PANEL_KEY = 'bwim.panelCollapsed';
 
 function el(tag, props = {}, kids = []) {
     const n = document.createElement(tag);
@@ -19,7 +20,7 @@ function el(tag, props = {}, kids = []) {
     return n;
 }
 
-/** #rrggbb -> rgba(r,g,b,a), for the selected-entry tint without color-mix(). */
+/** #rrggbb -> rgba(r,g,b,a), for the selected tint without needing color-mix(). */
 function softColor(hex, a) {
     const n = parseInt(hex.slice(1), 16);
     return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
@@ -28,7 +29,8 @@ function softColor(hex, a) {
 export function createUI(handlers) {
     const dom = {
         siteBtn: $('siteBtn'), siteName: $('siteName'), compassBtn: $('compassBtn'),
-        typeList: $('typeList'), overviewBtn: $('overviewBtn'),
+        typeList: $('typeList'), overviewBtn: $('overviewBtn'), pierBtn: $('pierBtn'),
+        panelOpen: $('panelOpen'), panelClose: $('panelClose'),
         calib: $('calib'), calHeading: $('calHeading'), calAlign: $('calAlign'),
         calTilt: $('calTilt'), calReset: $('calReset'), calOffset: $('calOffset'),
         picker: $('picker'), siteList: $('siteList'), pickerClose: $('pickerClose'),
@@ -63,38 +65,92 @@ export function createUI(handlers) {
     dom.pickerClose.addEventListener('click', closePicker);
 
     /* ------------------------------------------------------------------ *
-     * Sensor types                                                        *
+     * Sensor types and their per-unit submenus                            *
      * ------------------------------------------------------------------ */
-    let activeType = null;
+    let active = { type: null, unitId: null };
 
     function setTypes(entries) {
         dom.typeList.replaceChildren(...entries.map(e => {
-            const node = el('button', {
-                class: 'type', type: 'button', 'data-type': e.key, 'aria-pressed': 'false',
+            const hasUnits = e.units.length > 1;
+            const head = el('button', {
+                class: 'type', type: 'button', 'data-type': e.key,
+                'aria-pressed': 'false', 'aria-expanded': 'false',
             }, [
                 el('i', { class: 'bar' }),
                 el('span', { class: 't' }, [
                     el('span', { class: 'tl', text: e.label }),
                     el('span', { class: 'tn', text: e.count === 1 ? '1 unit' : `${e.count} units` }),
                 ]),
+                hasUnits ? el('span', { class: 'chev', 'aria-hidden': 'true', text: '›' }) : null,
             ]);
-            node.style.setProperty('--c', e.css);
-            node.style.setProperty('--c-soft', softColor(e.css, 0.18));
+            head.style.setProperty('--c', e.css);
+            head.style.setProperty('--c-soft', softColor(e.css, 0.18));
             // Tapping the selected type again clears it.
-            node.addEventListener('click', () => handlers.onSelectType(activeType === e.key ? null : e.key));
-            return node;
+            head.addEventListener('click', () =>
+                handlers.onSelectType(active.type === e.key && !active.unitId ? null : e.key));
+
+            const subs = el('div', { class: 'subs' }, e.units.map(u => {
+                const b = el('button', {
+                    class: 'sub', type: 'button', 'data-unit': u.id,
+                    'aria-pressed': 'false', text: u.label,
+                });
+                b.style.setProperty('--c', e.css);
+                b.style.setProperty('--c-soft', softColor(e.css, 0.18));
+                b.addEventListener('click', () =>
+                    handlers.onSelectUnit(e.key, active.unitId === u.id ? null : u.id));
+                return b;
+            }));
+            return el('div', { class: 'type-row' }, hasUnits ? [head, subs] : [head]);
         }));
-        setActiveType(activeType);
+        setActive(active.type, active.unitId);
     }
 
-    function setActiveType(k) {
-        activeType = k || null;
-        for (const node of dom.typeList.children) {
-            node.setAttribute('aria-pressed', String(node.dataset.type === activeType));
+    function setActive(type, unitId = null) {
+        active = { type: type || null, unitId: unitId || null };
+        for (const row of dom.typeList.children) {
+            const head = row.querySelector('.type');
+            const isType = head.dataset.type === active.type;
+            head.setAttribute('aria-pressed', String(isType && !active.unitId));
+            head.setAttribute('aria-expanded', String(isType));
+            const subs = row.querySelector('.subs');
+            if (subs) {
+                subs.classList.toggle('show', isType);
+                for (const b of subs.children) {
+                    b.setAttribute('aria-pressed', String(isType && b.dataset.unit === active.unitId));
+                }
+            }
         }
     }
 
     dom.overviewBtn.addEventListener('click', () => handlers.onOverview());
+
+    /* ------------------------------------------------------------------ *
+     * Pier tags                                                           *
+     * ------------------------------------------------------------------ */
+    dom.pierBtn.addEventListener('click', () => handlers.onTogglePiers());
+
+    function setPiersState(on, available) {
+        dom.pierBtn.disabled = !available;
+        dom.pierBtn.title = available
+            ? 'Show pier name tags'
+            : 'No piers listed for this bridge - add them to js/sites.js';
+        dom.pierBtn.classList.toggle('active', !!on && available);
+        dom.pierBtn.setAttribute('aria-pressed', String(!!on && available));
+    }
+
+    /* ------------------------------------------------------------------ *
+     * Panel collapse                                                      *
+     * ------------------------------------------------------------------ */
+    let collapsed = false;
+    function setCollapsed(on, remember = true) {
+        collapsed = !!on;
+        document.body.classList.toggle('panel-collapsed', collapsed);
+        dom.panelOpen.setAttribute('aria-expanded', String(!collapsed));
+        if (remember) { try { localStorage.setItem(PANEL_KEY, collapsed ? '1' : '0'); } catch { /* private mode */ } }
+    }
+    dom.panelClose.addEventListener('click', () => setCollapsed(true));
+    dom.panelOpen.addEventListener('click', () => setCollapsed(false));
+    try { setCollapsed(localStorage.getItem(PANEL_KEY) === '1', false); } catch { /* private mode */ }
 
     /* ------------------------------------------------------------------ *
      * Compass                                                             *
@@ -185,7 +241,8 @@ export function createUI(handlers) {
     return {
         buildPicker, openPicker, closePicker,
         setSite(site) { dom.siteName.textContent = site.name; },
-        setTypes, setActiveType,
+        setTypes, setActive, setPiersState,
+        setCollapsed, get collapsed() { return collapsed; },
         setCompassState, setCompassReading, setTiltState,
         loader, toast,
     };

@@ -1,8 +1,8 @@
 /**
  * Boot and wiring.
  *
- * Deep links: ?site=BKT, optionally &type=weight, so a view can be sent to
- * someone else as a plain URL.
+ * Deep links: ?site=BKT, optionally &type=axle and &unit=axle-2, so a view can
+ * be sent to someone else as a plain URL.
  */
 import { SITES, getSite } from './sites.js';
 import { createViewer } from './viewer.js';
@@ -16,27 +16,34 @@ const store = {
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 
-const viewer = createViewer({ canvas: document.getElementById('scene') });
+const viewer = createViewer({
+    canvas: document.getElementById('scene'),
+    labelsEl: document.getElementById('pierLabels'),
+});
 
 let site = null;          // current site record
-let groups = null;        // { axle, camera, weight } from detectSensors
+let groups = null;        // { axle, camera, weight, cabinet } from detectSensors
 let highlighter = null;
-let activeType = null;
+let selection = { type: null, unitId: null };
+let piersOn = false;
 let loading = false;
 
-/* ------------------------------------------------------------------ *
- * Type selection                                                      *
- * ------------------------------------------------------------------ */
-function selectType(k) {
-    if (!groups) return;
-    const type = SENSOR_TYPES.find(t => t.key === k) || null;
-    activeType = type ? type.key : null;
+const typeDef = k => SENSOR_TYPES.find(t => t.key === k) || null;
 
-    highlighter.set(activeType);
-    ui.setActiveType(activeType);
+/* ------------------------------------------------------------------ *
+ * Selection                                                           *
+ * ------------------------------------------------------------------ */
+function select(typeKey, unitId = null) {
+    if (!groups) return;
+    const type = typeDef(typeKey);
+    selection = { type: type ? type.key : null, unitId: type ? unitId : null };
+
+    highlighter.set(selection.type, selection.unitId);
+    ui.setActive(selection.type, selection.unitId);
 
     if (type) {
-        viewer.frameBox(groups[type.key].focus, type.framing);
+        const unit = selection.unitId && groups[type.key].units.find(u => u.id === selection.unitId);
+        viewer.frameBox(unit ? unit.box : groups[type.key].focus, type.framing);
         // BKT ships its camera nodes as empty placeholders, so there is a
         // position to fly to but nothing to light up. Say so rather than
         // leaving someone staring at an unchanged model.
@@ -53,8 +60,18 @@ function syncUrl() {
     if (!site) return;
     const p = new URLSearchParams();
     p.set('site', site.code);
-    if (activeType) p.set('type', activeType);
+    if (selection.type) p.set('type', selection.type);
+    if (selection.unitId) p.set('unit', selection.unitId);
     history.replaceState(null, '', `${location.pathname}?${p}`);
+}
+
+/* ------------------------------------------------------------------ *
+ * Pier tags                                                           *
+ * ------------------------------------------------------------------ */
+function applyPiers() {
+    const piers = site?.piers || [];
+    viewer.setPierLabels(piersOn ? piers : []);
+    ui.setPiersState(piersOn, piers.length > 0);
 }
 
 /* ------------------------------------------------------------------ *
@@ -63,8 +80,10 @@ function syncUrl() {
 const ui = createUI({
     onOpenPicker: () => { ui.buildPicker(SITES, site?.code); ui.openPicker(); },
     onChooseSite: s => loadSite(s),
-    onSelectType: selectType,
-    onOverview: () => selectType(null),
+    onSelectType: k => select(k),
+    onSelectUnit: (k, unitId) => select(k, unitId),
+    onOverview: () => select(null),
+    onTogglePiers: () => { piersOn = !piersOn; applyPiers(); },
     onCompassToggle: () => (compass.active ? stopCompass() : startCompass()),
     onCalibrate: (what, arg) => {
         if (what === 'align') {
@@ -106,15 +125,15 @@ function stopCompass() {
 /* ------------------------------------------------------------------ *
  * Site loading                                                        *
  * ------------------------------------------------------------------ */
-async function loadSite(next, wantType = null) {
+async function loadSite(next, want = {}) {
     if (loading || !next) return;
     loading = true;
 
     highlighter?.dispose();
     highlighter = null;
     groups = null;
-    activeType = null;
-    ui.setActiveType(null);
+    selection = { type: null, unitId: null };
+    ui.setActive(null);
     if (compass.active) stopCompass();
 
     ui.loader.show(next.name, `${next.code} · ${next.sizeMB} MB`);
@@ -133,14 +152,17 @@ async function loadSite(next, wantType = null) {
 
         ui.setSite(site);
         ui.setTypes(SENSOR_TYPES.map(t => ({
-            key: t.key, label: t.label, css: t.css, count: groups[t.key].points.length,
+            key: t.key, label: t.label, css: t.css,
+            count: groups[t.key].count,
+            units: groups[t.key].units.map(u => ({ id: u.id, label: u.label })),
         })));
         ui.setTiltState(compass.tiltEnabled);
+        applyPiers();
 
         viewer.frameModel();
         ui.loader.hide();
 
-        if (wantType) selectType(wantType);
+        if (want.type) select(want.type, want.unit);
         else syncUrl();
     } catch (err) {
         console.error('[main] model load failed', err);
@@ -166,13 +188,13 @@ if (params.has('debug')) {
         viewer,
         get site() { return site; },
         get groups() { return groups; },
-        get activeType() { return activeType; },
+        get selection() { return selection; },
     };
 }
 
 ui.buildPicker(SITES, initial?.code);
 if (initial) {
-    loadSite(initial, params.get('type'));
+    loadSite(initial, { type: params.get('type'), unit: params.get('unit') });
 } else {
     ui.loader.hide();
     ui.openPicker();

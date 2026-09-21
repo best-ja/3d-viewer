@@ -23,9 +23,12 @@
     --sar: env(safe-area-inset-right, 0px);
 
     --tap: 44px;    /* minimum touch target */
-    --panel-w: 140px;
+    --panel-w: 148px;
+    /* Left edge of anything that must clear the side panel. */
+    --gutter: calc(var(--sal) + var(--panel-w) + 16px);
 }
 @media (min-width: 720px) { :root { --panel-w: 224px; } }
+body.panel-collapsed { --gutter: calc(var(--sal) + 8px); }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
@@ -49,6 +52,19 @@ body {
     width: 100vw; height: 100vh;
     touch-action: none;                      /* OrbitControls handles gestures */
     background: radial-gradient(circle at 50% 18%, #1e293b 0%, #0b1120 68%, #060912 100%);
+}
+
+/* ---------- pier name tags (CSS2D) ---------- */
+#pierLabels { position: fixed; inset: 0; z-index: 6; pointer-events: none; overflow: hidden; }
+.pier-tag {
+    position: absolute;
+    background: rgba(6, 9, 18, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.5);
+    color: #e2e8f0;
+    font: 700 11px/1.2 var(--font);
+    letter-spacing: 0.5px;
+    padding: 3px 8px; border-radius: 6px;
+    white-space: nowrap; user-select: none;
 }
 
 /* ---------- shared surfaces ---------- */
@@ -105,13 +121,41 @@ body {
     display: flex; flex-direction: column; gap: 7px;
     padding: 10px;
     overflow-y: auto;
+    transition: transform 0.22s ease, opacity 0.22s ease;
 }
+/* Collapsed: slide it right off the screen and leave only the open button. */
+body.panel-collapsed #sidePanel {
+    transform: translateX(calc(-100% - var(--sal) - 16px));
+    opacity: 0; pointer-events: none;
+}
+
+#panelOpen {
+    position: fixed; z-index: 26;
+    left: calc(var(--sal) + 8px);
+    top: calc(var(--sat) + 70px);
+    width: var(--tap); min-height: var(--tap); padding: 0;
+    font-size: 17px;
+    background: var(--panel);
+    display: none;
+}
+body.panel-collapsed #panelOpen { display: inline-flex; }
+
 .sp-head {
+    display: flex; align-items: center; gap: 6px;
     font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px;
-    color: var(--dim); padding: 0 2px 2px;
+    color: var(--dim); padding: 0 0 2px 2px;
 }
+#panelClose {
+    margin-left: auto; appearance: none; border: 0; background: none;
+    color: var(--dim); cursor: pointer;
+    font-size: 17px; line-height: 1;
+    width: 30px; height: 30px; border-radius: 8px;
+}
+#panelClose:active { background: rgba(148, 163, 184, 0.2); }
+
 #typeList { display: flex; flex-direction: column; gap: 7px; }
 
+.type-row { display: flex; flex-direction: column; }
 .type {
     appearance: none; cursor: pointer; text-align: left;
     display: flex; align-items: stretch; gap: 9px;
@@ -125,19 +169,39 @@ body {
 .type .t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
 .type .tl { font-size: 11.5px; font-weight: 700; line-height: 1.25; letter-spacing: 0.2px; }
 .type .tn { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
-.type[aria-pressed="true"] {
-    background: var(--c-soft);
-    border-color: var(--c);
+.type .chev {
+    flex: 0 0 auto; align-self: center; color: var(--dim);
+    font-size: 10px; transition: transform 0.18s ease;
 }
+.type[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.type[aria-pressed="true"] { background: var(--c-soft); border-color: var(--c); }
 .type[aria-pressed="true"] .tl { color: var(--c); }
 .type[aria-pressed="true"] .tn { color: var(--text); }
 
-#overviewBtn { margin-top: 2px; min-height: 38px; font-size: 12px; }
+/* per-unit submenu */
+.subs { display: none; flex-direction: column; gap: 4px; margin: 5px 0 1px 10px; }
+.subs.show { display: flex; }
+.sub {
+    appearance: none; cursor: pointer; text-align: left;
+    display: flex; align-items: center; gap: 8px;
+    min-height: 36px; padding: 5px 9px;
+    border: 1px solid transparent; border-left: 2px solid var(--border);
+    border-radius: 0 9px 9px 0;
+    background: none; color: var(--dim);
+    font: 600 11.5px/1.2 var(--font);
+}
+.sub:active { background: rgba(148, 163, 184, 0.14); }
+.sub[aria-pressed="true"] {
+    background: var(--c-soft); border-left-color: var(--c); color: var(--c);
+}
+
+.sp-foot { display: flex; gap: 6px; margin-top: 2px; }
+.sp-foot .btn { flex: 1; min-height: 36px; font-size: 11.5px; padding: 6px 4px; }
 
 /* ---------- compass calibration ---------- */
 #calib {
     position: fixed; z-index: 28;
-    left: calc(var(--sal) + var(--panel-w) + 16px);
+    left: var(--gutter);
     right: calc(var(--sar) + 8px);
     bottom: calc(var(--sab) + 8px);
     max-width: 380px;
@@ -204,7 +268,7 @@ body {
 /* ---------- toast ---------- */
 #toast {
     position: fixed; z-index: 80;
-    left: calc(var(--sal) + var(--panel-w) + 16px);
+    left: var(--gutter);
     right: calc(var(--sar) + 8px);
     bottom: calc(var(--sab) + 12px);
     margin: 0 auto; max-width: 420px;
@@ -218,5 +282,5 @@ body {
 #toast.show { opacity: 1; transform: translateY(0); }
 
 @media (prefers-reduced-motion: reduce) {
-    #toast, #loader { transition: none; }
+    #toast, #loader, #sidePanel, .type .chev { transition: none; }
 }

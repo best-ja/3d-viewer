@@ -3,6 +3,7 @@
 A phone-first 3D viewer for the bridge weigh-in-motion installations. Pick a bridge, pick a sensor
 type, and every unit of that type lights up on the model while the camera moves to a view that
 shows them — for weight sensors, that means going under the deck and looking up at the girders.
+Expand a type to fly to one individual unit, and collapse the panel to get the whole screen back.
 
 It shows where equipment is. It records nothing and reports no readings.
 
@@ -52,34 +53,66 @@ Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per
 | `file` | path to the GLB, case-sensitive |
 | `sizeMB`, `captured` | shown in the picker so you know what you are about to download |
 | `northOffsetDeg` | true bearing of the model's &minus;Z axis. `0` means "not surveyed" |
+| `piers` | pier name tags — see [Pier name tags](#pier-name-tags) |
 
 Nothing else is per-bridge. Equipment is found in the model itself.
 
-## The three sensor types
+## The four sensor types
 
-| Panel entry | What it is | How it is found |
-| --- | --- | --- |
-| **AXLE DETECTOR** | Benewake TF03-100 LiDAR, 4 per bridge | node named `TF03-100 LiDAR-R004` |
-| **CAMERA** | Axis Q16 series, 2 per bridge | node named `AxisCam_Q16O#<n>` |
-| **WEIGHT SENSOR** | strain plates on the girders, plus the uPVC conduit run that wires them | geometric, see below |
+| Panel entry | What it is | Units | How it is found |
+| --- | --- | --- | --- |
+| **AXLE DETECTOR** | Benewake TF03-100 LiDAR + its Plate Axle | AXLE 1-4 | node `TF03-100 LiDAR-R004`, plus plates at the same chainage |
+| **CAMERA** | Axis Q16 series | CAM 1-2 | node `AxisCam_Q16O#<n>` |
+| **WEIGHT SENSOR** | strain plates on the girders and slab soffit, plus the uPVC conduit that wires them | — | geometric, see below |
+| **CAS / BTS** | the two cabinets and their ตู้ครอบ enclosure | CAS, BTS | nodes `CAS` and `BTS`, plus whatever is inside the enclosure |
 
-Three things worth knowing before editing `js/sensors.js`:
+Tapping a type highlights all of it; expanding a type and tapping a unit flies to that one unit.
+WEIGHT SENSOR has no submenu — 12–16 rows would swamp a phone, and the array is the useful thing
+to look at anyway.
+
+Things worth knowing before editing `js/sensors.js`:
 
 - Node names are matched on a **punctuation-stripped key**. GLTFLoader rewrites names on import
   (`TF03-100 LiDAR-R004` arrives as `TF03-100_LiDAR-R004`), and the camera instance number differs
   per site (`#2` on four sites, `#3` on BRC).
-- **The strain gauges are not named.** Nothing in any of the five models is called "strain" or
-  "WeightSensor", so they are found by shape and position: ~150 mm plates with mounting studs, at
-  girder level, ~2 m apart across the deck, in two cross-sections near midspan. Every threshold
-  sits in the `STRAIN` block at the top of `js/sensors.js` — that is the one place to adjust if a
-  re-export moves things. Current results: 12 sensors on SSW, TPA and BRC, 16 on BKT, 14 on
-  PM1-BWK. Detection is logged to the console on every load, so it can be checked against the
-  model.
-  If a future export names the plates, replace the whole `findStrainPlates()` heuristic with a name
-  match like the other two types.
+- **The plates are not named.** Nothing in any model is called "strain", "plate", "ตู้" or "ครอบ",
+  so the 150 mm plates are found by shape and then sorted by where they sit. They fall into three
+  families, consistently across all five models (BKT shown):
+
+  | band | where | what it is |
+  | --- | --- | --- |
+  | A | 8 on the girder bottom flanges, `y 2.5` | weight sensor |
+  | B | 8 higher up / on the slab soffit, `y 3.1` | weight sensor |
+  | C | 4 mid-deck, at the axle-detector chainages, `y 3.6` | **Plate Axle** |
+
+  `classifyPlates()` has the rules; every threshold is in the `STRAIN` block. Two ordering details
+  matter and are easy to undo by accident: the axle-chainage test runs *before* any bracket test,
+  because on SSW a real Plate Axle sits 1.48 m from its own detector; and cabinet hardware is
+  identified by falling *inside the enclosure box*, not by a radius around the nameplate, because
+  on SSW and BKT the cabinet sits in the middle of the strain array.
+
+  Current counts: 12 weight sensors on SSW and TPA, 16 on BKT, 14 on BRC and PM1-BWK (those two
+  each carry two ambiguous strays). Detection is logged to the console on every load.
+  If a future export names the plates, replace the heuristic with a name match like the other types.
 - The **conduit** is the opposite — completely reliable. Every piece has `conduit upvc` in its node
   name (195–328 meshes per model). The `VBO_Pipe` material only covers 5–19 fittings, so match on
   the name, not the material.
+
+## Pier name tags
+
+Pier numbers are **not in the model files** — three of the five have no pier nodes at all, and the
+two that do reuse the same component name across several locations. So they are listed per bridge
+in `js/sites.js` and shown with the **Piers** toggle in the side panel:
+
+```js
+{ code: 'BKT', /* … */
+  piers: [ { label: 'P13', at: 8.0 }, { label: 'P14', at: 33.0 } ] }
+```
+
+`at` is the chainage in metres along the deck's long axis in model coordinates — Z on every bridge
+except BRC, which runs along X. Loading a bridge logs a `pier hint` line with the column chainages
+it can find; that is a starting point, not an answer, so check it against the model. A bridge with
+an empty list shows no tags and the toggle is disabled.
 
 **`260919_BKT.glb` has no camera geometry.** Both of its `AxisCam` nodes are empty placeholders
 where the other four sites have 11 meshes each. Selecting CAMERA there flies to the mounting
@@ -96,9 +129,10 @@ A 150 mm plate bolted to a girder web is invisible on a 130 m bridge from most a
 - Each frame draws the model on layer 0, a dim quad over it, then clears depth and draws layer 1.
   Equipment buried inside the structure still reads.
 
-Axle detectors and cameras are physically small and spread far apart, so at a view that fits all of
-them they show as small bright marks rather than recognisable devices. Pinch to zoom in. The weight
-sensors read much better because sixteen of them plus the conduit form a visible line.
+Axle detectors and cameras are physically small and spread far apart, so selecting the whole type
+shows them as small bright marks rather than recognisable devices. That is what the per-unit
+submenus are for: tapping **AXLE 2** flies to that one detector at a few metres' stand-off. The
+weight sensors read well at type level because sixteen of them plus the conduit form a visible line.
 
 ## Compass mode
 
@@ -150,8 +184,9 @@ lever is a build-time `gltf-transform optimize` pass to produce smaller models.
 
 ## Links and debugging
 
-`?site=BKT` opens a bridge, `?site=BKT&type=weight` opens it with that type highlighted. The URL
-updates as you go, so it can be sent to someone else.
+`?site=BKT` opens a bridge, `?site=BKT&type=weight` opens it with that type highlighted, and
+`?site=BKT&type=axle&unit=axle-2` opens it on a single unit. The URL updates as you go, so it can be
+sent to someone else.
 
 `?debug=1` exposes `window.__bwim` with the viewer, the current site and the detected groups —
 useful for checking detection from the console on a real model.

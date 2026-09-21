@@ -28,6 +28,7 @@
 </head>
 <body>
     <canvas id="scene"></canvas>
+    <div id="pierLabels"></div>
 
     <header id="topbar" class="panel">
         <span class="brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</span>
@@ -39,10 +40,20 @@
                 title="Turn the view to face the same way as the phone">Compass</button>
     </header>
 
+    <button id="panelOpen" class="btn" aria-label="Show sensor types" aria-expanded="false">
+        <span aria-hidden="true">&#9776;</span>
+    </button>
+
     <aside id="sidePanel" class="panel" aria-label="Sensor types">
-        <div class="sp-head">Sensor type</div>
+        <div class="sp-head">
+            <span>Sensor type</span>
+            <button id="panelClose" aria-label="Hide panel"><span aria-hidden="true">&#8249;</span></button>
+        </div>
         <div id="typeList"></div>
-        <button class="btn" id="overviewBtn">Overview</button>
+        <div class="sp-foot">
+            <button class="btn small" id="pierBtn" aria-pressed="false">Piers</button>
+            <button class="btn small" id="overviewBtn">Overview</button>
+        </div>
     </aside>
 
     <section id="calib" class="panel" aria-label="Compass alignment">
@@ -51,7 +62,7 @@
             <span class="hdg" id="calHeading">&ndash;</span>
         </div>
         <div class="cnote">
-            Drag the view until it matches what is in front of you &mdash; the alignment is saved for this site.
+            Drag the view until it matches what is in front of you &mdash; the alignment is saved for this bridge.
         </div>
         <div class="crow">
             <button class="btn small nudge" data-nudge="-5">&minus;5&deg;</button>

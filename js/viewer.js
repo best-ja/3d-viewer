@@ -19,6 +19,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { HIGHLIGHT_LAYER } from './sensors.js';
 
 const easeInOut = k => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
@@ -26,7 +27,7 @@ const easeInOut = k => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 
 /** Coarse pointer == phone/tablet. Drives the quality/battery trade-offs. */
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 
-export function createViewer({ canvas }) {
+export function createViewer({ canvas, labelsEl }) {
     /* ---------------- renderer ---------------- */
     const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -125,6 +126,7 @@ export function createViewer({ canvas }) {
     }
 
     function clearModel() {
+        clearPierLabels();
         if (!model) return;
         scene.remove(model.root);
         disposeObject(model.root);
@@ -237,6 +239,45 @@ export function createViewer({ canvas }) {
 
     const frameModel = () => model && frameBox(model.bbox, 'overview');
 
+    /* ---------------- pier name tags ----------------
+       Pier numbers come from the `piers` list in js/sites.js - they are not in
+       the model files. The label renderer only runs when there are labels, so
+       with the toggle off this costs nothing. */
+    const pierGroup = new THREE.Group();
+    scene.add(pierGroup);
+    const labelRenderer = new CSS2DRenderer({ element: labelsEl });
+    labelRenderer.setSize(innerWidth, innerHeight);
+
+    function clearPierLabels() {
+        for (const o of [...pierGroup.children]) {
+            o.element?.remove();
+            pierGroup.remove(o);
+        }
+        invalidate();
+    }
+
+    /** @param piers [{ label, at }] - `at` is the chainage along the long axis. */
+    function setPierLabels(piers) {
+        clearPierLabels();
+        if (!model || !piers?.length) return;
+        // High enough on the structure to clear the deck and read against the sky.
+        const y = model.bbox.min.y + (model.bbox.max.y - model.bbox.min.y) * 0.82;
+        for (const p of piers) {
+            if (!Number.isFinite(p?.at)) continue;
+            const el = document.createElement('div');
+            el.className = 'pier-tag';
+            el.textContent = p.label;               // textContent: Thai-safe
+            const o = new CSS2DObject(el);
+            o.position.set(
+                model.majorAxis === 'x' ? p.at : model.center.x,
+                y,
+                model.majorAxis === 'x' ? model.center.z : p.at,
+            );
+            pierGroup.add(o);
+        }
+        invalidate();
+    }
+
     /* ---------------- render ---------------- */
     function render() {
         for (const cb of beforeRenderCbs) cb();
@@ -250,6 +291,7 @@ export function createViewer({ canvas }) {
             renderer.render(scene, camera);
             camera.layers.set(0);
         }
+        if (pierGroup.children.length) labelRenderer.render(scene, camera);
     }
 
     function animate() {
@@ -279,6 +321,7 @@ export function createViewer({ canvas }) {
         camera.aspect = innerWidth / innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
+        labelRenderer.setSize(innerWidth, innerHeight);
         invalidate();
     }
     addEventListener('resize', resize);
@@ -295,6 +338,7 @@ export function createViewer({ canvas }) {
         onFrame: cb => { frameCbs.push(cb); return () => detach(frameCbs, cb); },
         onBeforeRender: cb => { beforeRenderCbs.push(cb); return () => detach(beforeRenderCbs, cb); },
         setOverlay(on) { overlay = !!on; invalidate(); },
+        setPierLabels, clearPierLabels,
         start: animate,
     };
 }
