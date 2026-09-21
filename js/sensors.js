@@ -34,9 +34,10 @@
  * unrelated geometry is 0.63 m away, so attachUnitShells() sweeps them in
  * with a 0.5 m radius.
  *
- * Note 260919_BKT.glb has no camera geometry at all - both camera nodes are
- * empty placeholders. The camera type still resolves positions there so the
- * view can fly to the mounting points; it just has nothing to light up.
+ * An export can ship its camera nodes as empty placeholders - one of them did,
+ * before it was revised - so the camera type resolves positions from the nodes
+ * and works whether or not there is geometry hanging off them. report() warns
+ * when a model arrives with none.
  */
 import * as THREE from 'three';
 

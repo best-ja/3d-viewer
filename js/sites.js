@@ -49,18 +49,18 @@ export const SITES = [
     {
         code: 'BRC',
         name: 'BRC',                          // <- edit: display name
-        file: 'Model-glb/260918_BRC.glb',
-        sizeMB: 12.6,
-        captured: '2026-09-18',
+        file: 'Model-glb/260921_BRC_VE.glb',
+        sizeMB: 9.8,
+        captured: '2026-09-21',
         northOffsetDeg: 0,
         piers: [],
     },
     {
         code: 'BKT',
         name: 'BKT',                          // <- edit: display name
-        file: 'Model-glb/260919_BKT.glb',
-        sizeMB: 16.0,
-        captured: '2026-09-19',
+        file: 'Model-glb/260921_BKT_VE.glb',
+        sizeMB: 16.5,
+        captured: '2026-09-21',
         northOffsetDeg: 0,
         piers: [],
     },

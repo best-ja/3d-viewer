@@ -45,7 +45,7 @@ function select(typeKey, unitId = null) {
         const unit = selection.unitId && groups[type.key].units.find(u => u.id === selection.unitId);
         viewer.frameBox(unit ? unit.box : groups[type.key].focus,
                         unit ? (type.unitFraming ?? type.framing) : type.framing);
-        // BKT ships its camera nodes as empty placeholders, so there is a
+        // An export can ship its camera nodes as empty placeholders, leaving a
         // position to fly to but nothing to light up. Say so rather than
         // leaving someone staring at an unchanged model.
         if (type.key === CAMERA && !groups[CAMERA].meshes.length) {

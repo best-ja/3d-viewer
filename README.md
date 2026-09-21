@@ -129,10 +129,11 @@ except BRC, which runs along X. Loading a bridge logs a `pier hint` line with th
 it can find; that is a starting point, not an answer, so check it against the model. A bridge with
 an empty list shows no tags and the toggle is disabled.
 
-**`260919_BKT.glb` has no camera geometry.** Both of its `AxisCam` nodes are empty placeholders
-where the other four sites have 11 meshes each. Selecting CAMERA there flies to the mounting
-position, highlights nothing, and says so. Worth asking for a re-export if the camera bodies are
-meant to be there.
+**An export can ship empty camera nodes.** `260919_BKT.glb` did — both its `AxisCam` nodes were
+placeholders with no meshes — and it was re-exported as `260921_BKT_VE.glb` with the camera bodies
+present. The app copes either way: the camera type takes its positions from the nodes, so selecting
+CAMERA still flies to the mounting points, highlights whatever geometry exists, and warns in the
+console plus a toast when there is none. Worth chasing a re-export if that warning ever appears.
 
 ## How highlighting works
 
