@@ -43,7 +43,8 @@ function select(typeKey, unitId = null) {
 
     if (type) {
         const unit = selection.unitId && groups[type.key].units.find(u => u.id === selection.unitId);
-        viewer.frameBox(unit ? unit.box : groups[type.key].focus, type.framing);
+        viewer.frameBox(unit ? unit.box : groups[type.key].focus,
+                        unit ? (type.unitFraming ?? type.framing) : type.framing);
         // BKT ships its camera nodes as empty placeholders, so there is a
         // position to fly to but nothing to light up. Say so rather than
         // leaving someone staring at an unchanged model.

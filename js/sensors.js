@@ -90,7 +90,11 @@ const CAB = {
 };
 
 export const SENSOR_TYPES = [
-    { key: AXLE,    label: 'AXLE DETECTOR', color: 0x22d3ee, css: '#22d3ee', framing: 'above' },
+    // unitFraming: how to frame ONE unit, when that differs from the whole
+    // type. Zooming to a single detector has to come in over the road - see the
+    // roadside note in viewer.js.
+    { key: AXLE,    label: 'AXLE DETECTOR', color: 0x22d3ee, css: '#22d3ee', framing: 'above',
+      unitFraming: 'roadside' },
     { key: CAMERA,  label: 'CAMERA',        color: 0xc084fc, css: '#c084fc', framing: 'outside' },
     { key: WEIGHT,  label: 'WEIGHT SENSOR', color: 0xfbbf24, css: '#fbbf24', framing: 'under' },
     { key: CABINET, label: 'CAS / BTS',     color: 0x34d399, css: '#34d399', framing: 'under' },
@@ -177,8 +181,10 @@ export function detectSensors(model) {
             plates.weight.points, []),
         [CABINET]: makeGroup(CABINET, cabinet.meshes, cabinet.points, cabinet.units),
     };
-    // WEIGHT has no selectable units, so its count is the sensor count.
+    // Neither WEIGHT nor CAS/BTS has selectable units, so their panel counts
+    // come from the detections rather than from units.length.
     groups[WEIGHT].count = plates.weight.points.length;
+    groups[CABINET].count = cabinet.points.length;
 
     report(groups, conduit, plates, shells, model);
     return groups;
@@ -343,10 +349,9 @@ function collectCabinet(loose, anchors, claimed) {
         return [best, bestD];
     };
 
-    const byAnchor = anchors.map(() => []);
     const meshes = [];
     const shell = new THREE.Box3();
-    const add = (mesh, i) => { byAnchor[i].push(mesh); meshes.push(mesh); };
+    const add = mesh => meshes.push(mesh);
 
     for (const mesh of loose) {
         if (claimed.has(mesh)) continue;
@@ -359,37 +364,25 @@ function collectCabinet(loose, anchors, claimed) {
         if (IS_BIG_SECTION.test(key(mesh.name)) || IS_BIG_SECTION.test(key(mesh.parent?.name))) continue;
         box.setFromObject(mesh).getSize(size);
         if (Math.max(size.x, size.y, size.z) > CAB.MAX_PART) continue;
-        const [i, d] = nearest(box.getCenter(new THREE.Vector3()));
+        const [, d] = nearest(box.getCenter(new THREE.Vector3()));
         if (d > CAB.RADIUS) continue;
-        add(mesh, i);
+        add(mesh);
         shell.union(box.setFromObject(mesh));
     }
     for (const a of anchors) for (const mesh of a.meshes) {
-        if (!meshes.includes(mesh)) { add(mesh, anchors.indexOf(a)); shell.union(box.setFromObject(mesh)); }
+        if (!meshes.includes(mesh)) { add(mesh); shell.union(box.setFromObject(mesh)); }
     }
 
-    // CAS first, so the submenu reads the same way as the "CAS / BTS" label.
-    const RANK = ['CAS', 'BTS'];
-    const rank = n => (RANK.indexOf(n) + 1) || 99;
-    const order = anchors.map((a, i) => i)
-        .sort((a, b) => rank(anchors[a].name) - rank(anchors[b].name));
+    // No sub-units: the two cabinets are 0.56 m apart and are always looked at
+    // together, so they stack into one entry with no submenu.
     return {
         meshes,
         box: shell,
         points: anchors.map(a => a.position),
-        units: order.map(i => ({
-            id: anchors[i].name.toLowerCase(),
-            label: anchors[i].name,
-            meshes: byAnchor[i],
-            position: anchors[i].position,
-        })),
+        units: [],
         /** Plate clusters classifyPlates() decided belong to the cabinet. */
         absorb(extra) {
-            for (const mesh of extra) {
-                if (meshes.includes(mesh)) continue;
-                const [i] = nearest(box.setFromObject(mesh).getCenter(new THREE.Vector3()));
-                add(mesh, i);
-            }
+            for (const mesh of extra) if (!meshes.includes(mesh)) add(mesh);
         },
     };
 }

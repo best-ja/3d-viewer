@@ -182,6 +182,7 @@ export function createViewer({ canvas, labelsEl }) {
      *
      *   overview  the whole structure, raised three-quarter view
      *   above     looking down onto the deck
+     *   roadside  from over the carriageway, looking down and outward
      *   outside   off the side of the deck, looking slightly up
      *   under     below the deck looking UP at the girder soffit
      */
@@ -225,6 +226,16 @@ export function createViewer({ canvas, labelsEl }) {
                 dirV = along.clone().multiplyScalar(-0.62)
                     .addScaledVector(across, 0.5 * side)
                     .addScaledVector(new THREE.Vector3(0, 1, 0), 0.58);
+            } else if (mode === 'roadside') {
+                // Stand over the carriageway. Axle detectors are mounted on a
+                // ~1.85 m barrier whose centre is only 0.2 m outboard of them,
+                // so approaching from outside - which every other raised mode
+                // does - puts the wall between the camera and the device. This
+                // negates `side` to come in from the deck centre instead, which
+                // is also the face the detector actually points at.
+                dirV = across.clone().multiplyScalar(-0.85 * side)
+                    .addScaledVector(along, -0.30)
+                    .addScaledVector(new THREE.Vector3(0, 1, 0), 0.45);
             } else if (mode === 'outside') {
                 dirV = across.clone().multiplyScalar(0.9 * side)
                     .addScaledVector(along, -0.35)

@@ -64,11 +64,18 @@ Nothing else is per-bridge. Equipment is found in the model itself.
 | **AXLE DETECTOR** | Benewake TF03-100 LiDAR, its Plate Axle and its housing | AXLE 1-4 | node `TF03-100 LiDAR-R004`, plus everything within 0.5 m of it |
 | **CAMERA** | Axis Q16 series | CAM 1-2 | node `AxisCam_Q16O#<n>` |
 | **WEIGHT SENSOR** | strain plates on the girders and slab soffit, plus the uPVC conduit that wires them | — | geometric, see below |
-| **CAS / BTS** | the two cabinets and their ตู้ครอบ enclosure | CAS, BTS | nodes `CAS` and `BTS`, plus whatever is inside the enclosure |
+| **CAS / BTS** | the two cabinets and their ตู้ครอบ enclosure | — | nodes `CAS` and `BTS`, plus whatever is inside the enclosure |
 
 Tapping a type highlights all of it; expanding a type and tapping a unit flies to that one unit.
-WEIGHT SENSOR has no submenu — 12–16 rows would swamp a phone, and the array is the useful thing
-to look at anyway.
+WEIGHT SENSOR and CAS / BTS have no submenu: the weight array is 16–20 rows that would swamp a
+phone and is the useful thing to see whole, and the two cabinets are 0.56 m apart and always looked
+at together.
+
+Each type also carries a **framing** — where the camera goes when you select it. Weight sensors and
+CAS / BTS are viewed from under the deck looking up at the girders. Zooming to a single axle
+detector comes in **over the carriageway**: the detectors are mounted on a ~1.85 m barrier whose
+centre is only 0.2 m outboard of them, so approaching from outside — which every other raised view
+does — puts the wall between the camera and the device. See the `roadside` note in `js/viewer.js`.
 
 Things worth knowing before editing `js/sensors.js`:
 
@@ -137,6 +144,10 @@ A 150 mm plate bolted to a girder web is invisible on a 130 m bridge from most a
 - That material **must be `DoubleSide`**. Every material in these GLBs is `doubleSided`, and the
   Plate Axle is a zero-thickness plane; with three.js's default `FrontSide` it is culled from behind
   and the highlight silently disappears.
+- The highlight draws over the structure, so it stays visible even when the equipment is buried —
+  but the *context* around it does not, which is why the camera angle matters as much as the
+  highlight. The suite raycasts from camera to detector on all 20 axle units to prove the line of
+  sight is clear.
 - Each frame draws the model on layer 0, a dim quad over it, then clears depth and draws layer 1.
   Equipment buried inside the structure still reads.
 
