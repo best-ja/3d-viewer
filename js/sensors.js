@@ -109,9 +109,28 @@ const IS_AXLE = /^tf03100lidar/;
 const IS_CAMERA = /^axiscamq16o/;
 const IS_CONDUIT = /conduitupvc/;
 const IS_ANCHOR = /^(bts|cas)(\d+)?$/;
-/** Girder-scale rolled sections: |L-75x75... and |[-150x75... The key has its
- *  hyphens stripped, so the pattern must not contain one. */
-const IS_BIG_SECTION = /^\|(l(7[5-9]|[89]\d|\d{3})|\[)/;
+/**
+ * Rolled section profiles, matched on the RAW name - `key()` strips the leading
+ * "|" and the hyphens, so a pattern built for it can never match. Capture group
+ * 1 is the first dimension in mm, which is what separates structure from
+ * cabinet framing: |L-75x75... and |-150x75... are girder steel, while
+ * |SHS-32x32..., |L-30x30... and |L-40x40... are what the enclosures on BRC,
+ * PM1-BWK and TPA are welded from.
+ */
+const SECTION = /^\|(?:[A-Z]*-)?(\d{2,4})x/i;
+const STRUCTURAL_MM = 50;
+
+const isStructuralSection = name => {
+    const m = SECTION.exec(name || '');
+    return !!m && Number(m[1]) >= STRUCTURAL_MM;
+};
+
+/** A sheet big enough to be part of the deck rather than a cabinet: thin, but
+ *  broad in both other directions. Keeps 0.03 x 0.03 x 1.14 frame bars. */
+function isLargeSheet(size) {
+    const d = [size.x, size.y, size.z].sort((a, b) => a - b);
+    return d[1] > 0.10 && d[2] > 0.8;
+}
 
 const materialKeys = mesh => (Array.isArray(mesh.material) ? mesh.material : [mesh.material])
     .map(m => key(m && m.name));
@@ -361,10 +380,11 @@ function collectCabinet(loose, anchors, claimed) {
         // are the cabinet's own, so letting them in feeds back on itself. They
         // come back through absorb() once classifyPlates() has ruled on them.
         if (isStrainMetal(mesh)) continue;
-        // Girder members pass within the radius on SSW and BKT; skip them.
-        if (IS_BIG_SECTION.test(key(mesh.name)) || IS_BIG_SECTION.test(key(mesh.parent?.name))) continue;
+        // Girder angles and channels pass within the radius on SSW and BKT.
+        if (isStructuralSection(mesh.name) || isStructuralSection(mesh.parent?.name)) continue;
         box.setFromObject(mesh).getSize(size);
         if (Math.max(size.x, size.y, size.z) > CAB.MAX_PART) continue;
+        if (isLargeSheet(size)) continue;              // SSW's 1.25 m deck plates
         const [, d] = nearest(box.getCenter(new THREE.Vector3()));
         if (d > CAB.RADIUS) continue;
         add(mesh);
@@ -431,6 +451,15 @@ function report(groups, conduit, plates, shells, model) {
     if (hints.length) {
         console.log(`pier hint - column lines along ${model.majorAxis} at: ${hints.join(', ')}`
             + '  (a starting point for the `piers` list in js/sites.js - check them against the model)');
+    }
+    for (const t of SENSOR_TYPES) {
+        const us = groups[t.key].units;
+        if (!us.length) continue;
+        console.log(`${t.label} units (rename them per bridge with unitLabels in js/sites.js):`);
+        console.table(us.map(u => ({
+            id: u.id, label: u.label,
+            x: +u.position.x.toFixed(2), y: +u.position.y.toFixed(2), z: +u.position.z.toFixed(2),
+        })));
     }
     console.groupEnd();
     if (!groups[CAMERA].meshes.length) {

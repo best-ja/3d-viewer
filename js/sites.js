@@ -33,6 +33,33 @@
  *                console with the column chainages it can find - a starting
  *                point, but check them against the model. An empty list simply
  *                shows no tags.
+ *
+ * views          optional per-type camera overrides. The camera normally picks
+ *                its own angle - it raycasts to the target and swings round
+ *                until nothing is in the way - so this is only for when you
+ *                want a particular shot:
+ *
+ *                  views: {
+ *                    weight:  { flip: true },     // mirror across the deck
+ *                    cabinet: { azimuth: 135 },   // pin the direction, degrees
+ *                  }
+ *
+ *                Keys are the type keys: axle, camera, weight, cabinet. An
+ *                explicit azimuth is taken as given and skips the automatic
+ *                search, but still warns in the console if it looks into
+ *                something.
+ *
+ * unitLabels     optional per-type unit names, in the order the units run along
+ *                the deck. Loading a bridge logs every unit with its position,
+ *                so you can see which name belongs where:
+ *
+ *                  unitLabels: {
+ *                    axle:   ['A-01', 'A-02', 'A-03', 'A-04'],
+ *                    camera: ['CAM-01', 'CAM-02'],
+ *                  }
+ *
+ *                A list of the wrong length is ignored with a warning rather
+ *                than mislabelling anything.
  */
 export const SITES = [
     {

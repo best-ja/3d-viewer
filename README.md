@@ -54,6 +54,8 @@ Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per
 | `sizeMB`, `captured` | shown in the picker so you know what you are about to download |
 | `northOffsetDeg` | true bearing of the model's &minus;Z axis. `0` means "not surveyed" |
 | `piers` | pier name tags — see [Pier name tags](#pier-name-tags) |
+| `views` | per-type camera overrides — see below |
+| `unitLabels` | per-type unit names — see below |
 
 Nothing else is per-bridge. Equipment is found in the model itself.
 
@@ -76,6 +78,39 @@ CAS / BTS are viewed from under the deck looking up at the girders. Zooming to a
 detector comes in **over the carriageway**: the detectors are mounted on a ~1.85 m barrier whose
 centre is only 0.2 m outboard of them, so approaching from outside — which every other raised view
 does — puts the wall between the camera and the device. See the `roadside` note in `js/viewer.js`.
+
+**The camera checks its own shot.** Having computed where to stand, it raycasts to the target and
+counts anything bigger than 30 cm in the way; if something is, it swings round — 180°, ±45°, ±90°,
+±135° — and then closes in to 60% and 45% of the fitted distance, taking the first clear angle. Under
+a deck there is structure in every horizontal direction, so coming in *past* an obstruction is often
+the only option. Whatever the equipment is mounted on, within 1.5 m of it, does not count as
+blocking. This is what keeps BRC's CAM 1 and both bridges' cabinet views clear without per-site
+tuning.
+
+When you want a particular shot anyway, override it per bridge in `js/sites.js`:
+
+```js
+views: {
+  weight:  { flip: true },      // mirror the approach across the deck
+  cabinet: { azimuth: 135 },    // pin the horizontal direction, degrees
+}
+```
+
+Keys are the type keys — `axle`, `camera`, `weight`, `cabinet` — and an override applies to both the
+type view and its unit views. A pinned `azimuth` is taken as given and skips the automatic search,
+but still warns in the console if it turns out to look into something.
+
+**Unit names** are configurable the same way, in the order the units run along the deck:
+
+```js
+unitLabels: {
+  axle:   ['A-01', 'A-02', 'A-03', 'A-04'],
+  camera: ['CAM-01', 'CAM-02'],
+}
+```
+
+Loading a bridge logs every unit with its position, so it is clear which name belongs where. A list
+of the wrong length is ignored with a warning rather than mislabelling anything.
 
 Things worth knowing before editing `js/sensors.js`:
 
@@ -112,6 +147,11 @@ Things worth knowing before editing `js/sensors.js`:
 - The **conduit** is the opposite — completely reliable. Every piece has `conduit upvc` in its node
   name (195–328 meshes per model). The `VBO_Pipe` material only covers 5–19 fittings, so match on
   the name, not the material.
+- **The CAS/BTS capture excludes structural steel by section size.** Rolled sections are named
+  `|L-75x75…`, `|-150x75…`, `|SHS-32x32…`; anything 50 mm or over is girder steel, anything smaller
+  is what the enclosures on BRC, PM1-BWK and TPA are welded from. Match these on the **raw** name —
+  `key()` strips the leading `|` and the hyphens, so a pattern written for it silently matches
+  nothing, which is exactly how girder angles ended up highlighted on SSW and BKT.
 
 ## Pier name tags
 

@@ -45,7 +45,12 @@ function select(typeKey, unitId = null) {
     if (type) {
         const unit = selection.unitId && groups[type.key].units.find(u => u.id === selection.unitId);
         viewer.frameBox(unit ? unit.box : groups[type.key].focus,
-                        unit ? (type.unitFraming ?? type.framing) : type.framing);
+                        unit ? (type.unitFraming ?? type.framing) : type.framing,
+                        {
+                            // The group's own meshes are not obstructions.
+                            ignore: new Set(unit ? unit.meshes : groups[type.key].meshes),
+                            view: site.views?.[type.key],
+                        });
         // An export can ship its camera nodes as empty placeholders, leaving a
         // position to fly to but nothing to light up. Say so rather than
         // leaving someone staring at an unchanged model.
@@ -73,6 +78,24 @@ function syncUrl() {
 function applyPiers() {
     viewer.setPierLabels(piersOn ? piers : []);
     ui.setPiersState(piersOn, piers.length > 0);
+}
+
+/**
+ * Rename the detected units from the bridge's `unitLabels`, in the order they
+ * run along the deck. Kept here rather than in js/sensors.js so detection stays
+ * free of per-bridge knowledge.
+ */
+function applyUnitLabels() {
+    for (const [key, labels] of Object.entries(site.unitLabels || {})) {
+        const units = groups[key]?.units;
+        if (!units || !Array.isArray(labels)) continue;
+        if (labels.length !== units.length) {
+            console.warn(`[labels] ${site.code}.unitLabels.${key} has ${labels.length} name(s) `
+                + `but ${units.length} unit(s) were detected - ignoring it.`);
+            continue;
+        }
+        units.forEach((u, i) => { u.label = String(labels[i]); });
+    }
 }
 
 /**
@@ -169,6 +192,7 @@ async function loadSite(next, want = {}) {
         piers = resolvePiers(model);
 
         groups = detectSensors(model);
+        applyUnitLabels();
         highlighter = createHighlighter(viewer, groups);
 
         ui.setSite(site);
