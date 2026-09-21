@@ -61,7 +61,7 @@ Nothing else is per-bridge. Equipment is found in the model itself.
 
 | Panel entry | What it is | Units | How it is found |
 | --- | --- | --- | --- |
-| **AXLE DETECTOR** | Benewake TF03-100 LiDAR + its Plate Axle | AXLE 1-4 | node `TF03-100 LiDAR-R004`, plus plates at the same chainage |
+| **AXLE DETECTOR** | Benewake TF03-100 LiDAR, its Plate Axle and its housing | AXLE 1-4 | node `TF03-100 LiDAR-R004`, plus everything within 0.5 m of it |
 | **CAMERA** | Axis Q16 series | CAM 1-2 | node `AxisCam_Q16O#<n>` |
 | **WEIGHT SENSOR** | strain plates on the girders and slab soffit, plus the uPVC conduit that wires them | — | geometric, see below |
 | **CAS / BTS** | the two cabinets and their ตู้ครอบ enclosure | CAS, BTS | nodes `CAS` and `BTS`, plus whatever is inside the enclosure |
@@ -82,18 +82,26 @@ Things worth knowing before editing `js/sensors.js`:
   | band | where | what it is |
   | --- | --- | --- |
   | A | 8 on the girder bottom flanges, `y 2.5` | weight sensor |
-  | B | 8 higher up / on the slab soffit, `y 3.1` | weight sensor |
-  | C | 4 mid-deck, at the axle-detector chainages, `y 3.6` | **Plate Axle** |
+  | B | 8 on the slab soffit, `y 3.1` | weight sensor |
+  | C | 4 mid-deck, `y 3.6` | weight sensor |
 
-  `classifyPlates()` has the rules; every threshold is in the `STRAIN` block. Two ordering details
-  matter and are easy to undo by accident: the axle-chainage test runs *before* any bracket test,
-  because on SSW a real Plate Axle sits 1.48 m from its own detector; and cabinet hardware is
-  identified by falling *inside the enclosure box*, not by a radius around the nameplate, because
-  on SSW and BKT the cabinet sits in the middle of the strain array.
+  All three are weight sensors. The only plates that are not are the ones sitting on a detector,
+  a camera or inside the cabinet, which are handed to those instead.
 
-  Current counts: 12 weight sensors on SSW and TPA, 16 on BKT, 14 on BRC and PM1-BWK (those two
+  `classifyPlates()` has the rules; every threshold is in the `STRAIN` block. One detail matters
+  and is easy to undo by accident: cabinet hardware is identified by falling *inside the enclosure
+  box*, not by a radius around the nameplate, because on SSW and BKT the cabinet sits in the middle
+  of the strain array and any radius wide enough to catch its own plates also swallows real sensors.
+  The enclosure box is in turn built from non-plate meshes only, or it feeds on what it should exclude.
+
+  Current counts: 16 weight sensors on SSW and TPA, 20 on BKT, 18 on BRC and PM1-BWK (those two
   each carry two ambiguous strays). Detection is logged to the console on every load.
   If a future export names the plates, replace the heuristic with a name match like the other types.
+- **The detector housing and Plate Axle sit outside the LiDAR node.** Highlighting the named node
+  alone lights only the 44 mm device. In every model each detector has, within 8 cm of it, a
+  0.22 × 0.22 × 0.27 m `M06_Steel_Smoke` housing and three small mounting plates, all outside the
+  node; the nearest unrelated geometry is 0.63 m away, so `attachUnitShells()` sweeps them in with
+  a 0.5 m radius.
 - The **conduit** is the opposite — completely reliable. Every piece has `conduit upvc` in its node
   name (195–328 meshes per model). The `VBO_Pipe` material only covers 5–19 fittings, so match on
   the name, not the material.
@@ -126,13 +134,17 @@ A 150 mm plate bolted to a girder web is invisible on a 130 m bridge from most a
 - Highlighted meshes swap to **one shared flat-colour material per type** and move to
   `HIGHLIGHT_LAYER`. Swapping beats cloning — the weight group alone is 300–500 meshes, and the
   whole model has only 12–18 materials, so cloning would tint the bridge.
+- That material **must be `DoubleSide`**. Every material in these GLBs is `doubleSided`, and the
+  Plate Axle is a zero-thickness plane; with three.js's default `FrontSide` it is culled from behind
+  and the highlight silently disappears.
 - Each frame draws the model on layer 0, a dim quad over it, then clears depth and draws layer 1.
   Equipment buried inside the structure still reads.
 
-Axle detectors and cameras are physically small and spread far apart, so selecting the whole type
-shows them as small bright marks rather than recognisable devices. That is what the per-unit
-submenus are for: tapping **AXLE 2** flies to that one detector at a few metres' stand-off. The
-weight sensors read well at type level because sixteen of them plus the conduit form a visible line.
+Cameras are physically small and spread far apart, so selecting the whole type shows them as small
+bright marks rather than recognisable devices. That is what the per-unit submenus are for: tapping
+**CAM 2** flies to that one unit at a few metres' stand-off. Axle detectors read better now that
+their housing and Plate Axle are included, and the weight sensors read well at type level because
+the whole array plus the conduit forms a visible line.
 
 ## Compass mode
 

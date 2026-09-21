@@ -20,12 +20,19 @@
  * models (BKT shown):
  *
  *     band A   8 on the girder bottom flanges       y 2.5, z 19.9
- *     band B   8 higher up / on the slab soffit     y 3.1, z 20.7
- *     band C   4 mid-deck, at the axle-detector     y 3.6, z 17.9 and 22.9
- *              chainages  ->  the Plate Axle
+ *     band B   8 on the slab soffit                 y 3.1, z 20.7
+ *     band C   4 mid-deck                           y 3.6, z 17.9 and 22.9
  *
- * A+B are the weight sensors, C belongs to the axle detectors. classifyPlates()
- * has the rules and STRAIN has every threshold.
+ * All three are weight sensors. The only plates that are NOT are the ones
+ * sitting right on a detector or camera, which are that unit's own mount and
+ * are handed to it. classifyPlates() has the rules; STRAIN has the thresholds.
+ *
+ * The Plate Axle and the detector housing sit just OUTSIDE the named TF03
+ * node, so highlighting the node alone misses them. Measured in all five
+ * models, each detector has, within 8 cm of it: a 0.22 x 0.22 x 0.27 m
+ * M06_Steel_Smoke housing and three small mounting plates. The nearest
+ * unrelated geometry is 0.63 m away, so attachUnitShells() sweeps them in
+ * with a 0.5 m radius.
  *
  * Note 260919_BKT.glb has no camera geometry at all - both camera nodes are
  * empty placeholders. The camera type still resolves positions there so the
@@ -58,11 +65,20 @@ const STRAIN = {
      *  catch its own plates also swallows real weight sensors. The enclosure
      *  box is tight in exactly the directions that matter. */
     IN_CABINET: 0.15,
-    /** Closer than this to a camera and it is that camera's mount. LiDARs are
-     *  not tested this way - see the ordering note in classifyPlates(). */
-    NEAR_CAMERA: 1.5,
-    /** Within this of a LiDAR's chainage it is a Plate Axle, not a sensor. */
-    AXLE_CHAINAGE: 1.0,
+    /** Closer than this to a detector or camera and the plate is that unit's
+     *  own mount, so it belongs to that unit rather than to the weight array.
+     *  1.2 and not more: TPA's mount plates sit 0.23 m from their detector,
+     *  while SSW's nearest weight sensor is 1.48 m from one. */
+    NEAR_UNIT: 1.2,
+};
+
+/** The detector's own hardware, which the exports leave outside its node. */
+const UNIT_SHELL = {
+    /** Housing at 0.08 m, mounting plates at 0.03-0.04 m, nearest unrelated
+     *  geometry at 0.63 m - so anything in here belongs to the detector. */
+    RADIUS: 0.5,
+    /** Guards against a deck slab whose centre happens to fall nearby. */
+    MAX_PART: 0.6,
 };
 
 const CAB = {
@@ -77,7 +93,7 @@ export const SENSOR_TYPES = [
     { key: AXLE,    label: 'AXLE DETECTOR', color: 0x22d3ee, css: '#22d3ee', framing: 'above' },
     { key: CAMERA,  label: 'CAMERA',        color: 0xc084fc, css: '#c084fc', framing: 'outside' },
     { key: WEIGHT,  label: 'WEIGHT SENSOR', color: 0xfbbf24, css: '#fbbf24', framing: 'under' },
-    { key: CABINET, label: 'CAS / BTS',     color: 0x34d399, css: '#34d399', framing: 'outside' },
+    { key: CABINET, label: 'CAS / BTS',     color: 0x34d399, css: '#34d399', framing: 'under' },
 ];
 
 /** Name reduced to lowercase alphanumerics, so spaces, underscores, hyphens
@@ -135,10 +151,16 @@ export function detectSensors(model) {
         for (const c of obj.children) walk(c, u, a, cond);
     })(root, null, null, false);
 
-    // The cabinet shell is found first: classifyPlates() needs its box to tell
+    // Each detector's housing and mounting plates sit outside its node, so
+    // sweep them in first and mark them claimed - otherwise the cabinet and
+    // plate passes below would compete for the same meshes.
+    const claimed = new Set();
+    const shells = attachUnitShells(loose, units[AXLE], claimed);
+
+    // The cabinet shell is found next: classifyPlates() needs its box to tell
     // the cabinet's own plates from the weight sensors packed in around it.
-    const cabinet = collectCabinet(loose, anchors);
-    const plates = classifyPlates(loose, majorAxis, units[AXLE], units[CAMERA], cabinet.box);
+    const cabinet = collectCabinet(loose, anchors, claimed);
+    const plates = classifyPlates(loose, units[AXLE], units[CAMERA], cabinet.box, claimed);
     cabinet.absorb(plates.cabinet.meshes);
 
     const groups = {
@@ -147,7 +169,7 @@ export function detectSensors(model) {
             [...units[AXLE].map(u => u.position), ...plates.axle.points],
             numberedUnits(units[AXLE], 'axle', 'AXLE', majorAxis)),
         [CAMERA]: makeGroup(CAMERA,
-            units[CAMERA].flatMap(u => u.meshes),
+            [...units[CAMERA].flatMap(u => u.meshes), ...plates.camera.meshes],
             units[CAMERA].map(u => u.position),
             numberedUnits(units[CAMERA], 'cam', 'CAM', majorAxis)),
         [WEIGHT]: makeGroup(WEIGHT,
@@ -158,8 +180,34 @@ export function detectSensors(model) {
     // WEIGHT has no selectable units, so its count is the sensor count.
     groups[WEIGHT].count = plates.weight.points.length;
 
-    report(groups, conduit, plates, model);
+    report(groups, conduit, plates, shells, model);
     return groups;
+}
+
+/**
+ * Pull each detector's own hardware into its unit. The exports leave the
+ * housing and mounting plates outside the named TF03 node, so highlighting the
+ * node alone lights the 44 mm device and nothing around it.
+ */
+function attachUnitShells(loose, units, claimed) {
+    const box = new THREE.Box3(), size = new THREE.Vector3();
+    let n = 0;
+    for (const mesh of loose) {
+        if (claimed.has(mesh)) continue;
+        box.setFromObject(mesh).getSize(size);
+        if (Math.max(size.x, size.y, size.z) > UNIT_SHELL.MAX_PART) continue;
+        const centre = box.getCenter(new THREE.Vector3());
+        let best = null, bestD = UNIT_SHELL.RADIUS;
+        for (const u of units) {
+            const d = u.position.distanceTo(centre);
+            if (d < bestD) { bestD = d; best = u; }
+        }
+        if (!best) continue;
+        best.meshes.push(mesh);
+        claimed.add(mesh);
+        n++;
+    }
+    return n;
 }
 
 /** Turn detected units into selectable, chainage-ordered entries. */
@@ -201,7 +249,7 @@ function makeGroup(k, meshes, points, units) {
  * Find the 150 mm plates and sort them into Plate Axles, weight sensors and
  * cabinet hardware. See the three-band note at the top of the file.
  */
-function classifyPlates(loose, majorAxis, axleUnits, cameraUnits, cabinetBox) {
+function classifyPlates(loose, axleUnits, cameraUnits, cabinetBox, claimed) {
     const box = new THREE.Box3();
     const size = new THREE.Vector3();
 
@@ -209,7 +257,7 @@ function classifyPlates(loose, majorAxis, axleUnits, cameraUnits, cabinetBox) {
     //    the ride so the highlight reads bigger than a bare plate would.
     const candidates = [];
     for (const mesh of loose) {
-        if (!isStrainMetal(mesh)) continue;
+        if (claimed.has(mesh) || !isStrainMetal(mesh)) continue;
         box.setFromObject(mesh).getSize(size);
         const d = [size.x, size.y, size.z].sort((a, b) => a - b);
         if (d[2] > STRAIN.MAX_PART) continue;
@@ -239,22 +287,17 @@ function classifyPlates(loose, majorAxis, axleUnits, cameraUnits, cabinetBox) {
         }
     }
 
-    // 3. Sort every cluster that actually holds a plate.
-    //
-    //    Order matters. The axle-chainage test runs BEFORE any "this is a
-    //    mounting bracket" test for LiDARs, because everything at a detector's
-    //    chainage belongs to the axle group whether it is the Plate Axle or the
-    //    detector's own bracket - and on SSW a real Plate Axle sits 1.48 m from
-    //    its detector, close enough that a bracket test would have eaten it.
-    const axleChainages = axleUnits.map(u => u.position[majorAxis]);
+    // 3. Sort every cluster that actually holds a plate. Nothing is discarded:
+    //    a plate on a unit is handed to that unit, everything else is a weight
+    //    sensor.
     const inCabinet = cabinetBox && !cabinetBox.isEmpty()
         ? cabinetBox.clone().expandByScalar(STRAIN.IN_CABINET) : null;
     const out = {
         axle: { meshes: [], points: [] },
+        camera: { meshes: [] },
         weight: { meshes: [], points: [] },
         cabinet: { meshes: [] },
         claimed: new Set(),
-        skipped: 0,
         noPlate: 0,
     };
 
@@ -266,11 +309,11 @@ function classifyPlates(loose, majorAxis, axleUnits, cameraUnits, cabinetBox) {
 
         if (inCabinet && inCabinet.containsPoint(centre)) {
             out.cabinet.meshes.push(...meshes);
-        } else if (axleChainages.some(v => Math.abs(centre[majorAxis] - v) < STRAIN.AXLE_CHAINAGE)) {
-            out.axle.meshes.push(...meshes);
+        } else if (axleUnits.some(u => u.position.distanceTo(centre) < STRAIN.NEAR_UNIT)) {
+            out.axle.meshes.push(...meshes);           // a detector's own mount
             out.axle.points.push(centre);
-        } else if (cameraUnits.some(u => u.position.distanceTo(centre) < STRAIN.NEAR_CAMERA)) {
-            out.skipped++;                            // a camera's own mount
+        } else if (cameraUnits.some(u => u.position.distanceTo(centre) < STRAIN.NEAR_UNIT)) {
+            out.camera.meshes.push(...meshes);         // a camera's own mount
         } else {
             out.weight.meshes.push(...meshes);
             out.weight.points.push(centre);
@@ -284,7 +327,7 @@ function classifyPlates(loose, majorAxis, axleUnits, cameraUnits, cabinetBox) {
  * The enclosure is two flat panels on SSW and BKT and a welded angle-and-SHS
  * frame on the other three, so it is taken by radius rather than by name.
  */
-function collectCabinet(loose, anchors) {
+function collectCabinet(loose, anchors, claimed) {
     if (!anchors.length) {
         return { meshes: [], points: [], units: [], box: new THREE.Box3(), absorb() {} };
     }
@@ -306,6 +349,7 @@ function collectCabinet(loose, anchors) {
     const add = (mesh, i) => { byAnchor[i].push(mesh); meshes.push(mesh); };
 
     for (const mesh of loose) {
+        if (claimed.has(mesh)) continue;
         // Strain plates are packed in around the cabinet on SSW and BKT. They
         // must not shape the shell box - that box is what decides which plates
         // are the cabinet's own, so letting them in feeds back on itself. They
@@ -376,7 +420,7 @@ function pierHints(model) {
     return lines.slice(0, 20).map(v => +v.toFixed(1));
 }
 
-function report(groups, conduit, plates, model) {
+function report(groups, conduit, plates, shells, model) {
     console.groupCollapsed('[sensors] detected');
     console.table(SENSOR_TYPES.map(t => ({
         type: t.label,
@@ -385,10 +429,9 @@ function report(groups, conduit, plates, model) {
         meshes: groups[t.key].meshes.length,
     })));
     console.log('conduit meshes', conduit.length,
-        '| plate axles', plates.axle.points.length,
         '| weight sensors', plates.weight.points.length,
         '| cabinet plates', plates.cabinet.meshes.length,
-        '| brackets skipped', plates.skipped,
+        '| detector housing/plate meshes', shells,
         '| clusters without a plate', plates.noPlate);
     const hints = pierHints(model);
     if (hints.length) {
@@ -416,9 +459,13 @@ export const HIGHLIGHT_LAYER = 1;
  * has 12-18 materials, so cloning would tint the bridge.
  */
 export function createHighlighter(viewer, groups) {
+    // DoubleSide is not optional. Every material in these GLBs is
+    // doubleSided, and the Plate Axle is a zero-thickness 1.12 x 0.81 m plane -
+    // with the default FrontSide it is culled from behind and the highlight
+    // simply vanishes, leaving only the 0.19 m detector body visible.
     const materials = Object.fromEntries(SENSOR_TYPES.map(t => [
         t.key,
-        new THREE.MeshBasicMaterial({ color: t.color, toneMapped: false }),
+        new THREE.MeshBasicMaterial({ color: t.color, toneMapped: false, side: THREE.DoubleSide }),
     ]));
 
     let active = null;      // { type, unitId }
