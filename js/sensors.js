@@ -439,6 +439,120 @@ function report(groups, conduit, plates, shells, model) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Piers and true north                                                *
+ * ------------------------------------------------------------------ */
+
+/** Matched on the RAW name, not the punctuation-stripped key - the key helper
+ *  drops non-ASCII, which would destroy "Pier 9 ขาออก". */
+const IS_PIER = /pier|ตอม่อ/i;
+/** A compass rose exported as four letter glyphs. */
+const IS_ROSE = /^([NESW])(#\d+)?(_\d+)?$/;
+/** Pier columns closer than this along the deck are one pier line. */
+const PIER_LINE = 3.0;
+
+/**
+ * Undo what the exporter and GLTFLoader do to a group name.
+ *
+ * Spaces become underscores on export ("Pier 9 ขาออก" -> "Pier_9_ขาออก"), and
+ * GLTFLoader appends _1, _2 ... to every repeat of a name it has already seen,
+ * which stacks ("Pier_1_6"). So strip the trailing numeric suffixes first, then
+ * put the spaces back.
+ *
+ * This is why pier groups should be named "Pier-02", not "Pier_02" - a trailing
+ * underscore-number is indistinguishable from a de-duplication suffix.
+ */
+const cleanLabel = n => (n || '')
+    .replace(/^Geom3D_/, '')
+    .replace(/(_\d+)+$/, '')
+    .replace(/_/g, ' ')
+    .trim();
+
+/**
+ * Pier name tags taken from the model.
+ *
+ * Pier numbers are only present if the designer named the pier groups - glTF
+ * has no text primitive, so SketchUp Text and Dimension entities are dropped
+ * on export and only group/component names survive. Where a model has none,
+ * main.js falls back to the `piers` list in js/sites.js.
+ *
+ * Note a component *definition* name is shared by all its instances, so a
+ * model can name its piers and still not identify them individually - BRC
+ * reuses "Pier 9 ขาออก" at three locations. That warns rather than guessing.
+ *
+ * @returns {{label:string, position:THREE.Vector3}[]} one entry per pier line
+ */
+export function detectPiers(model) {
+    const { root, majorAxis } = model;
+    const found = [];
+    (function walk(obj, inside) {
+        const hit = !inside && IS_PIER.test(obj.name || '');
+        if (hit) {
+            found.push({
+                label: cleanLabel(obj.name),
+                position: obj.getWorldPosition(new THREE.Vector3()),
+            });
+        }
+        for (const c of obj.children) walk(c, inside || hit);
+    })(root, false);
+    if (!found.length) return [];
+
+    // One tag per pier line, or TPA draws eight labels over four piers.
+    const lines = [];
+    for (const p of found.sort((a, b) => a.position[majorAxis] - b.position[majorAxis])) {
+        const last = lines[lines.length - 1];
+        if (last && Math.abs(p.position[majorAxis] - last.at) < PIER_LINE) last.members.push(p);
+        else lines.push({ at: p.position[majorAxis], members: [p] });
+    }
+    const piers = lines.map(l => ({
+        label: l.members[0].label,
+        position: l.members
+            .reduce((v, p) => v.add(p.position), new THREE.Vector3())
+            .divideScalar(l.members.length),
+    }));
+
+    const dupes = piers.map(p => p.label).filter((l, i, a) => a.indexOf(l) !== i);
+    if (dupes.length) {
+        console.warn(`[piers] ${piers.length} pier lines but repeated labels (${[...new Set(dupes)].join(', ')}). `
+            + 'These are component definition names shared by every instance - name each pier '
+            + 'instance (Entity Info) to tell them apart.');
+    }
+    console.log(`[piers] ${piers.length} from the model:`, piers.map(p => p.label).join(', '));
+    return piers;
+}
+
+/**
+ * True north from a compass rose modelled as four letter glyphs (N/E/S/W).
+ * @returns {number|null} bearing of the model's -Z axis, degrees clockwise
+ *          from north - the same convention as bearingOfModelDir().
+ */
+export function detectNorth(model) {
+    const marks = {};
+    model.root.traverse(o => {
+        const m = IS_ROSE.exec(o.name || '');
+        if (!m) return;
+        const box = new THREE.Box3().setFromObject(o);
+        if (!box.isEmpty()) marks[m[1]] = box.getCenter(new THREE.Vector3());
+    });
+    if (!marks.N || !marks.S) return null;
+
+    const ns = new THREE.Vector3().subVectors(marks.N, marks.S);
+    if (ns.lengthSq() < 1e-4) return null;
+    // W->E must be square to S->N, or this is not a rose.
+    if (marks.E && marks.W) {
+        const we = new THREE.Vector3().subVectors(marks.E, marks.W);
+        const cos = Math.abs(ns.clone().setY(0).normalize().dot(we.setY(0).normalize()));
+        if (cos > 0.2) {
+            console.warn('[north] N/E/S/W found but not square - ignoring the rose.');
+            return null;
+        }
+    }
+    const deg = -THREE.MathUtils.radToDeg(Math.atan2(ns.x, -ns.z));
+    const bearing = ((deg % 360) + 360) % 360;
+    console.log(`[north] compass rose found - model -Z bears ${bearing.toFixed(1)}°`);
+    return bearing;
+}
+
+/* ------------------------------------------------------------------ *
  * Highlighting                                                        *
  * ------------------------------------------------------------------ */
 

@@ -267,23 +267,31 @@ export function createViewer({ canvas, labelsEl }) {
         invalidate();
     }
 
-    /** @param piers [{ label, at }] - `at` is the chainage along the long axis. */
+    /** Tag height: high on the structure, so tags line up and read against the
+     *  sky whether they came from the model or from the sites.js list. */
+    const tagY = () => model.bbox.min.y + (model.bbox.max.y - model.bbox.min.y) * 0.82;
+
+    /** A point on the deck centreline at chainage `at` along the long axis. */
+    function pointAtChainage(at) {
+        if (!model || !Number.isFinite(at)) return null;
+        return new THREE.Vector3(
+            model.majorAxis === 'x' ? at : model.center.x,
+            tagY(),
+            model.majorAxis === 'x' ? model.center.z : at,
+        );
+    }
+
+    /** @param piers [{ label, position }] */
     function setPierLabels(piers) {
         clearPierLabels();
         if (!model || !piers?.length) return;
-        // High enough on the structure to clear the deck and read against the sky.
-        const y = model.bbox.min.y + (model.bbox.max.y - model.bbox.min.y) * 0.82;
         for (const p of piers) {
-            if (!Number.isFinite(p?.at)) continue;
+            if (!p?.position) continue;
             const el = document.createElement('div');
             el.className = 'pier-tag';
             el.textContent = p.label;               // textContent: Thai-safe
             const o = new CSS2DObject(el);
-            o.position.set(
-                model.majorAxis === 'x' ? p.at : model.center.x,
-                y,
-                model.majorAxis === 'x' ? model.center.z : p.at,
-            );
+            o.position.set(p.position.x, tagY(), p.position.z);
             pierGroup.add(o);
         }
         invalidate();
@@ -349,7 +357,7 @@ export function createViewer({ canvas, labelsEl }) {
         onFrame: cb => { frameCbs.push(cb); return () => detach(frameCbs, cb); },
         onBeforeRender: cb => { beforeRenderCbs.push(cb); return () => detach(beforeRenderCbs, cb); },
         setOverlay(on) { overlay = !!on; invalidate(); },
-        setPierLabels, clearPierLabels,
+        setPierLabels, clearPierLabels, pointAtChainage,
         start: animate,
     };
 }

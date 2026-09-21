@@ -6,7 +6,7 @@
  */
 import { SITES, getSite } from './sites.js';
 import { createViewer } from './viewer.js';
-import { detectSensors, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
+import { detectSensors, detectPiers, detectNorth, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
 import { createCompass } from './compass.js';
 import { createUI } from './ui.js';
 
@@ -26,6 +26,7 @@ let groups = null;        // { axle, camera, weight, cabinet } from detectSensor
 let highlighter = null;
 let selection = { type: null, unitId: null };
 let piersOn = false;
+let piers = [];           // resolved [{ label, position }]
 let loading = false;
 
 const typeDef = k => SENSOR_TYPES.find(t => t.key === k) || null;
@@ -70,9 +71,21 @@ function syncUrl() {
  * Pier tags                                                           *
  * ------------------------------------------------------------------ */
 function applyPiers() {
-    const piers = site?.piers || [];
     viewer.setPierLabels(piersOn ? piers : []);
     ui.setPiersState(piersOn, piers.length > 0);
+}
+
+/**
+ * Pier tags come from the model when the designer named the pier groups, and
+ * from the `piers` list in js/sites.js when they did not. glTF has no text
+ * primitive, so SketchUp Text entities do not survive export - only names do.
+ */
+function resolvePiers(model) {
+    const detected = detectPiers(model);
+    if (detected.length) return detected;
+    return (site.piers || [])
+        .map(p => ({ label: p.label, position: viewer.pointAtChainage(p.at) }))
+        .filter(p => p.position);
 }
 
 /* ------------------------------------------------------------------ *
@@ -133,6 +146,7 @@ async function loadSite(next, want = {}) {
     highlighter?.dispose();
     highlighter = null;
     groups = null;
+    piers = [];
     selection = { type: null, unitId: null };
     ui.setActive(null);
     if (compass.active) stopCompass();
@@ -146,7 +160,13 @@ async function loadSite(next, want = {}) {
 
         site = next;
         store.set(LAST_SITE_KEY, site.code);
-        compass.setSite(site.code, site.northOffsetDeg);
+
+        // A model that carries an N/E/S/W compass rose already knows which way
+        // it faces, so there is nothing for the inspector to calibrate.
+        const north = detectNorth(model);
+        compass.setSite(site.code, north ?? site.northOffsetDeg,
+                        north != null || site.northOffsetDeg != null);
+        piers = resolvePiers(model);
 
         groups = detectSensors(model);
         highlighter = createHighlighter(viewer, groups);
@@ -190,6 +210,8 @@ if (params.has('debug')) {
         get site() { return site; },
         get groups() { return groups; },
         get selection() { return selection; },
+        get piers() { return piers; },
+        compass,
     };
 }
 

@@ -69,6 +69,7 @@ export function createCompass(viewer, { onStatus, onReading }) {
     let listening = false;
     let waitTimer = null;
     let hasStoredOffset = false;
+    let surveyed = false;        // the offset came from the model or from config
 
     let smoothTheta = null, smoothPhi = null, lastFrame = 0;
 
@@ -119,6 +120,7 @@ export function createCompass(viewer, { onStatus, onReading }) {
 
     const emit = () => onReading && onReading({
         heading, tilt, absolute, northOffset, active,
+        source: hasStoredOffset ? 'saved' : (surveyed ? 'model' : 'unset'),
     });
 
     /* ---------- sensor plumbing ---------- */
@@ -140,10 +142,11 @@ export function createCompass(viewer, { onStatus, onReading }) {
         if (firstFix) {
             firstFix = false;
             status('ok');
-            // No surveyed bearing for this site yet - start tracking from
+            // No surveyed bearing for this bridge - start tracking from
             // whatever the inspector was already looking at, so the view does
-            // not jump the moment the mode is switched on.
-            if (!hasStoredOffset && siteDefault === 0) alignToCurrentView();
+            // not jump the moment the mode is switched on. A surveyed offset is
+            // never auto-calibrated over, including a legitimate 0.
+            if (!hasStoredOffset && !surveyed) alignToCurrentView();
             else smoothTheta = thetaFor(heading);
         }
         emit();
@@ -244,10 +247,15 @@ export function createCompass(viewer, { onStatus, onReading }) {
         get heading() { return heading; },
         get northOffset() { return northOffset; },
         get tiltEnabled() { return tiltEnabled; },
+        get surveyed() { return surveyed; },
 
-        setSite(code, defaultDeg = 0) {
+        /** @param defaultDeg bearing of the model -Z axis, or null if unknown.
+         *  @param isSurveyed true when that bearing is real (model compass rose
+         *         or a configured value) rather than an unset placeholder. */
+        setSite(code, defaultDeg = null, isSurveyed = false) {
             siteCode = code;
-            siteDefault = defaultDeg || 0;
+            surveyed = !!isSurveyed && Number.isFinite(defaultDeg);
+            siteDefault = Number.isFinite(defaultDeg) ? defaultDeg : 0;
             let stored = null;
             try { stored = localStorage.getItem(STORE_PREFIX + code); } catch { /* private mode */ }
             hasStoredOffset = stored !== null && stored !== '';

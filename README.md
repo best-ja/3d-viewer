@@ -115,9 +115,29 @@ Things worth knowing before editing `js/sensors.js`:
 
 ## Pier name tags
 
-Pier numbers are **not in the model files** — three of the five have no pier nodes at all, and the
-two that do reuse the same component name across several locations. So they are listed per bridge
-in `js/sites.js` and shown with the **Piers** toggle in the side panel:
+Pier tags come from the model when the designer has named the pier groups, and from `js/sites.js`
+when they have not. Either way they are shown by the **Piers** toggle in the side panel.
+
+**From the model (preferred).** Any node whose name contains `Pier` or `ตอม่อ` becomes a tag at its
+own position; columns within 3 m along the deck are merged into one pier line, so a pier built from
+two columns gets one label rather than two. Nothing to configure.
+
+There is a catch worth understanding, because it is what the models do today. glTF has **no text
+primitive**, so SketchUp *Text* and *Dimension* entities are silently dropped on export — only group
+and component **names** survive. And a component *definition* name is shared by every instance of
+it, so TPA's four piers all arrive called `Pier`, and BRC's arrive as `Pier 9 ขาออก` repeated across
+three locations. The app renders them as-is and warns in the console:
+
+```
+[piers] 4 pier lines but repeated labels (Pier). These are component definition names
+shared by every instance - name each pier instance (Entity Info) to tell them apart.
+```
+
+**The fix is in SketchUp:** name each pier *instance* — `Pier-02`, `Pier-03` … — not just the
+component definition. Use a hyphen, not `Pier_02`: a trailing underscore-number cannot be told apart
+from the suffix glTF exporters add when de-duplicating repeated names, and would be stripped.
+
+**Fallback.** For a bridge whose model names no piers, list them in `js/sites.js`:
 
 ```js
 { code: 'BKT', /* … */
@@ -126,8 +146,8 @@ in `js/sites.js` and shown with the **Piers** toggle in the side panel:
 
 `at` is the chainage in metres along the deck's long axis in model coordinates — Z on every bridge
 except BRC, which runs along X. Loading a bridge logs a `pier hint` line with the column chainages
-it can find; that is a starting point, not an answer, so check it against the model. A bridge with
-an empty list shows no tags and the toggle is disabled.
+it can find; a starting point, not an answer. A bridge with neither source shows no tags and the
+toggle is disabled.
 
 **An export can ship empty camera nodes.** `260919_BKT.glb` did — both its `AxisCam` nodes were
 placeholders with no meshes — and it was re-exported as `260921_BKT_VE.glb` with the camera bodies
@@ -169,16 +189,22 @@ Turns the view to follow the phone's heading.
 - A phone with no magnetometer reports only a relative heading, which is useless here. The app
   detects that and stays on touch control.
 
-**Alignment.** The models carry no georeferencing, so the app has to be told which way they face:
+**Alignment.** The app has to know which way the model faces. In order of preference:
 
-1. Tap **Compass**. The first reading calibrates against whatever you were already looking at, so
-   the view does not jump.
-2. If it is off, just **drag the view** until it matches what is in front of you — that
-   re-calibrates. Or use the ±5° buttons.
-3. The offset is saved per bridge in the browser.
+1. **A compass rose in the model.** If the export contains four letter glyphs named `N`, `E`, `S`
+   and `W`, the bearing is read straight off them — no calibration at all. `260921_BKT_VE.glb` has
+   one, and it is the best thing your designer can add to the other four. The panel shows "from the
+   model compass rose" when this is what is in use.
+2. **A surveyed value** in `northOffsetDeg` in `js/sites.js`. `null` means *not surveyed*; do not
+   use `0` as a placeholder, because 0° is a real bearing — BKT's rose gives exactly that — and the
+   app would auto-calibrate over it.
+3. **Calibrating on site.** With neither of the above, the first heading aligns to whatever you were
+   already looking at, so the view does not jump. If it is off, **drag the view** until it matches
+   what is in front of you, or use the ±5° buttons. The result is saved per bridge in the browser
+   and takes precedence over both of the above, so an on-site correction is never overwritten.
 
 Once a bridge has been aligned on site, copy the "Model north offset" value the panel shows into
-that entry's `northOffsetDeg` in `js/sites.js`, and nobody has to calibrate it again.
+that entry's `northOffsetDeg`, and nobody has to calibrate it again.
 
 `Follow tilt` additionally pitches the view with the phone. It is off by default and is only
 accurate in portrait.

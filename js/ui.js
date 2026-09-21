@@ -133,7 +133,8 @@ export function createUI(handlers) {
         dom.pierBtn.disabled = !available;
         dom.pierBtn.title = available
             ? 'Show pier name tags'
-            : 'No piers listed for this bridge - add them to js/sites.js';
+            : 'No piers in this model - name the pier groups in the export, '
+              + 'or list them in js/sites.js';
         dom.pierBtn.classList.toggle('active', !!on && available);
         dom.pierBtn.setAttribute('aria-pressed', String(!!on && available));
     }
@@ -186,9 +187,16 @@ export function createUI(handlers) {
         if (reading) setCompassReading(reading);
     }
 
-    function setCompassReading({ heading, northOffset }) {
+    const OFFSET_SOURCE = {
+        model: 'from the model compass rose',
+        saved: 'saved for this bridge',
+        unset: 'not surveyed — drag to align',
+    };
+
+    function setCompassReading({ heading, northOffset, source }) {
         dom.calHeading.textContent = heading == null ? '–' : `${cardinal(heading)} ${heading.toFixed(0)}°`;
-        dom.calOffset.textContent = `Model north offset ${northOffset.toFixed(0)}° · saved for this bridge`;
+        dom.calOffset.textContent = `Model north offset ${northOffset.toFixed(0)}° · `
+            + (OFFSET_SOURCE[source] || OFFSET_SOURCE.saved);
     }
 
     function setTiltState(on) {
