@@ -34,32 +34,44 @@
  *                point, but check them against the model. An empty list simply
  *                shows no tags.
  *
- * views          optional per-type camera overrides. The camera normally picks
- *                its own angle - it raycasts to the target and swings round
+ * views          optional camera overrides. The camera normally picks its own
+ *                angle - it raycasts to the target, swings round and closes in
  *                until nothing is in the way - so this is only for when you
  *                want a particular shot:
  *
  *                  views: {
- *                    weight:  { flip: true },     // mirror across the deck
- *                    cabinet: { azimuth: 135 },   // pin the direction, degrees
+ *                    weight:   { flip: true },                  // whole type
+ *                    'CAM-01': { azimuth: 312, elevation: 8,    // one sensor
+ *                                distance: 9.4 },
  *                  }
  *
- *                Keys are the type keys: axle, camera, weight, cabinet. An
- *                explicit azimuth is taken as given and skips the automatic
- *                search, but still warns in the console if it looks into
- *                something.
+ *                Keys are the type keys (axle, camera, weight, cabinet) or a
+ *                single unit, by the name you gave it or by its id. A unit's
+ *                own entry wins over its type's. Fields:
  *
- * unitLabels     optional per-type unit names, in the order the units run along
- *                the deck. Loading a bridge logs every unit with its position,
- *                so you can see which name belongs where:
+ *                  azimuth    degrees, which side the camera stands on
+ *                             (0 = -Z, 90 = +X)
+ *                  elevation  degrees above level; negative looks up
+ *                  distance   metres back from the target
+ *                  flip       mirror the automatic choice across the deck
+ *
+ *                Set only what you care about; the rest keep the automatic
+ *                values. azimuth/elevation/distance are taken as given and skip
+ *                the automatic search, but still warn if they look into
+ *                something. Do not guess the numbers - orbit to the view you
+ *                want and run bwimView() in the console. See CONFIG.md.
+ *
+ * unitLabels     optional per-type unit names. The nth name goes to the nth
+ *                unit along the deck, and the panel is then ordered BY NAME:
  *
  *                  unitLabels: {
  *                    axle:   ['A-01', 'A-02', 'A-03', 'A-04'],
  *                    camera: ['CAM-01', 'CAM-02'],
  *                  }
  *
- *                A list of the wrong length is ignored with a warning rather
- *                than mislabelling anything.
+ *                Loading a bridge logs every unit with its position, so you can
+ *                see which name belongs where. A list of the wrong length is
+ *                ignored with a warning rather than mislabelling anything.
  */
 export const SITES = [
     {
@@ -70,6 +82,9 @@ export const SITES = [
         captured: '2026-09-16',
         northOffsetDeg: null,
         piers: [],                            // <- edit: [{ label: 'P13', at: 4.7 }, ...]
+        unitLabels: {
+                    axle:   ['AXLE-01', 'AXLE-03', 'AXLE-04', 'AXLE-02'],
+                  },
     },
     {
         code: 'TPA',
@@ -79,6 +94,10 @@ export const SITES = [
         captured: '2026-09-18',
         northOffsetDeg: null,
         piers: [],
+        unitLabels: {
+            axle:   ['AXLE-01', 'AXLE-04', 'AXLE-02', 'AXLE-03'],
+            camera: ['CAM-02', 'CAM-01'],
+        },
     },
     {
         code: 'BRC',
@@ -88,15 +107,9 @@ export const SITES = [
         captured: '2026-09-21',
         northOffsetDeg: null,
         piers: [],
-    },
-    {
-        code: 'BKT',
-        name: 'BKT',                          // <- edit: display name
-        file: 'Model-glb/260921_BKT_VE.glb',
-        sizeMB: 16.5,
-        captured: '2026-09-21',
-        northOffsetDeg: null,
-        piers: [],
+        unitLabels: {
+            axle:   ['AXLE-03', 'AXLE-02', 'AXLE-04', 'AXLE-01'],
+        },
     },
     {
         code: 'PM1-BWK',
@@ -106,6 +119,22 @@ export const SITES = [
         captured: '2026-09-19',
         northOffsetDeg: null,
         piers: [],
+        unitLabels: {
+            axle:   ['AXLE-04', 'AXLE-01', 'AXLE-03', 'AXLE-02'],
+        },
+    },
+    {
+        code: 'BKT',
+        name: 'BKT',                          // <- edit: display name
+        file: 'Model-glb/260921_BKT_VE.glb',
+        sizeMB: 16.5,
+        captured: '2026-09-21',
+        northOffsetDeg: null,
+        piers: [],
+        unitLabels: {
+            axle:   ['AXLE-04', 'AXLE-02', 'AXLE-03', 'AXLE-01'],
+            camera: ['CAM-02', 'CAM-01'],
+        },
     },
 ];
 

@@ -45,7 +45,9 @@ that way in `js/sites.js`.
 
 ## Configuring bridges
 
-Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per bridge:
+Everything site-specific lives in [`js/sites.js`](js/sites.js) — one entry per bridge. For renaming
+sensors and setting camera angles by hand, **[CONFIG.md](CONFIG.md) is the manual**; this section is
+the summary.
 
 | field | meaning |
 | --- | --- |
@@ -100,7 +102,18 @@ Keys are the type keys — `axle`, `camera`, `weight`, `cabinet` — and an over
 type view and its unit views. A pinned `azimuth` is taken as given and skips the automatic search,
 but still warns in the console if it turns out to look into something.
 
-**Unit names** are configurable the same way, in the order the units run along the deck:
+An override can also name a single sensor, by the label you gave it or by its id, and can set
+`elevation` and `distance` as well as `azimuth`:
+
+```js
+views: {
+  axle:     { azimuth: 90 },                     // all four
+  'A-02':   { azimuth: 210, elevation: 15 },     // …except this one
+}
+```
+
+**Unit names** are configurable the same way. The nth name goes to the nth unit along the deck, and
+the panel is then ordered *by name*:
 
 ```js
 unitLabels: {
@@ -111,6 +124,10 @@ unitLabels: {
 
 Loading a bridge logs every unit with its position, so it is clear which name belongs where. A list
 of the wrong length is ignored with a warning rather than mislabelling anything.
+
+To find an angle rather than guess it: select the sensor, orbit until it looks right, and run
+`bwimView()` in the browser console — it prints a line ready to paste into `views`. Full walkthrough
+in [CONFIG.md](CONFIG.md).
 
 Things worth knowing before editing `js/sensors.js`:
 

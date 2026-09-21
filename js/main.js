@@ -49,7 +49,8 @@ function select(typeKey, unitId = null) {
                         {
                             // The group's own meshes are not obstructions.
                             ignore: new Set(unit ? unit.meshes : groups[type.key].meshes),
-                            view: site.views?.[type.key],
+                            view: viewFor(type, unit),
+                            label: unit ? `${type.key} / ${unit.label}` : type.key,
                         });
         // An export can ship its camera nodes as empty placeholders, leaving a
         // position to fly to but nothing to light up. Say so rather than
@@ -81,11 +82,15 @@ function applyPiers() {
 }
 
 /**
- * Rename the detected units from the bridge's `unitLabels`, in the order they
- * run along the deck. Kept here rather than in js/sensors.js so detection stays
- * free of per-bridge knowledge.
+ * Rename the detected units from the bridge's `unitLabels` - the nth name goes
+ * to the nth unit along the deck - then order the panel by those names, since
+ * the name is what you read. Numeric collation keeps A-10 after A-9.
+ *
+ * Kept here rather than in js/sensors.js so detection stays free of per-bridge
+ * knowledge. Unit ids stay bound to their physical unit, so ?unit= deep links
+ * keep resolving whatever the display order.
  */
-function applyUnitLabels() {
+function applyUnitConfig() {
     for (const [key, labels] of Object.entries(site.unitLabels || {})) {
         const units = groups[key]?.units;
         if (!units || !Array.isArray(labels)) continue;
@@ -96,6 +101,21 @@ function applyUnitLabels() {
         }
         units.forEach((u, i) => { u.label = String(labels[i]); });
     }
+    for (const t of SENSOR_TYPES) {
+        groups[t.key]?.units.sort((a, b) =>
+            a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+    }
+}
+
+/**
+ * The view override for a shot: a unit's own entry wins over its type's, and a
+ * unit can be named either way round - by the label you gave it, or by its
+ * stable id - so a rename does not silently drop the override.
+ */
+function viewFor(type, unit) {
+    const v = site?.views || {};
+    if (unit) return v[unit.label] ?? v[unit.id] ?? v[type.key];
+    return v[type.key];
 }
 
 /**
@@ -192,7 +212,7 @@ async function loadSite(next, want = {}) {
         piers = resolvePiers(model);
 
         groups = detectSensors(model);
-        applyUnitLabels();
+        applyUnitConfig();
         highlighter = createHighlighter(viewer, groups);
 
         ui.setSite(site);
@@ -225,6 +245,27 @@ viewer.start();
 
 const params = new URLSearchParams(location.search);
 const initial = getSite(params.get('site')) || getSite(store.get(LAST_SITE_KEY));
+
+/**
+ * Print where the camera is now, in the form js/sites.js wants. Select a
+ * sensor, orbit until it looks right, call this, paste the line into `views`.
+ * See CONFIG.md.
+ */
+window.bwimView = () => {
+    if (!site || !groups) { console.log('Load a bridge first.'); return null; }
+    const a = viewer.currentAngles();
+    const type = selection.type ? typeDef(selection.type) : null;
+    const unit = selection.unitId
+        ? groups[selection.type].units.find(u => u.id === selection.unitId) : null;
+    const key = unit ? unit.label : type?.key;
+    console.log(`${site.code} · ${type ? type.key : 'overview'}`
+        + (unit ? ` · ${unit.label}` : ''));
+    console.log(key
+        ? `views: { '${key}': { azimuth: ${Math.round(a.azimuth)}, `
+          + `elevation: ${Math.round(a.elevation)}, distance: ${a.distance.toFixed(1)} } }`
+        : 'Select a sensor type first, then orbit and call bwimView() again.');
+    return { site: site.code, type: type?.key ?? null, unit: unit?.label ?? null, ...a };
+};
 
 // Debug seam, off unless ?debug=1 is in the URL. Lets the test harness assert
 // on materials and layers, and is handy from the console in the field.

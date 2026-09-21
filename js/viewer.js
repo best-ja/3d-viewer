@@ -189,6 +189,31 @@ export function createViewer({ canvas, labelsEl }) {
     const MOUNTED_ON = 1.5;
 
     /**
+     * Camera position from a target and a { azimuth, elevation, distance }.
+     * azimuth 0 looks from -Z, 90 from +X; elevation is degrees above level.
+     */
+    function eyeFromAngles(target, { azimuth, elevation, distance }) {
+        const az = THREE.MathUtils.degToRad(azimuth);
+        const el = THREE.MathUtils.degToRad(elevation);
+        return new THREE.Vector3(
+            target.x + Math.sin(az) * Math.cos(el) * distance,
+            target.y + Math.sin(el) * distance,
+            target.z - Math.cos(az) * Math.cos(el) * distance,
+        );
+    }
+
+    /** The inverse, so a view can be read back off the running app. */
+    function anglesFromEye(target, eye) {
+        const v = new THREE.Vector3().subVectors(eye, target);
+        const distance = v.length() || 1e-6;
+        return {
+            azimuth: (THREE.MathUtils.radToDeg(Math.atan2(v.x, -v.z)) + 360) % 360,
+            elevation: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(v.y / distance, -1, 1))),
+            distance,
+        };
+    }
+
+    /**
      * How many things bigger than 30 cm stand between the camera and what it is
      * pointed at. Runs once per selection, never per frame.
      */
@@ -223,7 +248,7 @@ export function createViewer({ canvas, labelsEl }) {
      *   outside   off the side of the deck, looking slightly up
      *   under     below the deck looking UP at the girder soffit
      */
-    function frameBox(box, mode = 'overview', { ignore, view } = {}) {
+    function frameBox(box, mode = 'overview', { ignore, view, label } = {}) {
         if (!model || box.isEmpty()) return;
 
         const centre = box.getCenter(new THREE.Vector3());
@@ -298,16 +323,37 @@ export function createViewer({ canvas, labelsEl }) {
                 .addScaledVector(new THREE.Vector3(h.x, baseDir.y, h.z).normalize(), reach);
         };
 
-        let eye;
-        if (Number.isFinite(view?.azimuth)) {
-            // An explicit angle is what was asked for, so take it as given -
-            // but still say so if it turns out to look into something.
-            // azimuth(v) = atan2(v.x, -v.z), and rotating about +Y *decreases*
-            // it, so the swing needed is current - wanted, not the reverse.
-            const want = THREE.MathUtils.degToRad(view.azimuth);
-            eye = eyeAt(Math.atan2(baseDir.x, -baseDir.z) - want);
+        // Decompose the automatic shot, so an override can replace one angle
+        // without disturbing the others.
+        const auto = eyeAt(0, 1).sub(target);
+        const autoDist = auto.length();
+        const base = {
+            azimuth: THREE.MathUtils.radToDeg(Math.atan2(auto.x, -auto.z)),
+            elevation: THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(auto.y / autoDist, -1, 1))),
+            distance: autoDist,
+        };
+        const pinned = ['azimuth', 'elevation', 'distance'].filter(k => Number.isFinite(view?.[k]));
+
+        let eye, shot = base;
+        if (pinned.length) {
+            // An explicit angle is what was asked for, so take it as given.
+            shot = { ...base };
+            for (const k of pinned) shot[k] = view[k];
+            eye = eyeFromAngles(target, shot);
+            if (mode === 'under') {
+                // Never let a hand-set elevation drop through the ground plane.
+                const floor = model.bbox.min.y + 1.6;
+                if (eye.y < floor) {
+                    eye.setY(floor);
+                    console.warn(`[view] ${label || mode} elevation clamped to stay above the ground.`);
+                }
+            }
             const n = blockedCount(eye, target, ignore);
-            if (n) console.warn(`[view] ${mode} pinned to ${view.azimuth}° but ${n} object(s) block it.`);
+            if (n) {
+                console.warn(`[view] ${label || mode} pinned to `
+                    + pinned.map(k => `${k} ${view[k]}`).join(', ')
+                    + ` but ${n} object(s) block it.`);
+            }
         } else {
             // Try the computed shot, then swing round, then close in.
             let bestN = Infinity;
@@ -321,11 +367,14 @@ export function createViewer({ canvas, labelsEl }) {
                 }
             }
             if (bestN > 0) {
-                console.warn(`[view] no clear angle for ${mode}; best of `
+                console.warn(`[view] no clear angle for ${label || mode}; best of `
                     + `${VIEW_SWINGS.length * VIEW_SCALES.length} tried still has `
                     + `${bestN} object(s) in the way.`);
             }
+            shot = anglesFromEye(target, eye);
         }
+        console.log(`[view] ${label || mode} — azimuth ${shot.azimuth.toFixed(0)}°, `
+            + `elevation ${shot.elevation.toFixed(0)}°, distance ${shot.distance.toFixed(1)} m`);
         flyTo(eye, target);
     }
 
@@ -439,6 +488,8 @@ export function createViewer({ canvas, labelsEl }) {
         onBeforeRender: cb => { beforeRenderCbs.push(cb); return () => detach(beforeRenderCbs, cb); },
         setOverlay(on) { overlay = !!on; invalidate(); },
         setPierLabels, clearPierLabels, pointAtChainage,
+        /** Where the camera is now, in the same terms js/sites.js uses. */
+        currentAngles: () => anglesFromEye(controls.target, camera.position),
         start: animate,
     };
 }
