@@ -76,7 +76,7 @@
 export const SITES = [
     {
         code: 'SSW',
-        name: 'SSW',                          // <- edit: display name
+        name: 'สุขสวัสดิ์',                          // <- edit: display name
         file: 'Model-glb/260921_SSW_VE.glb',
         sizeMB: 21.9,
         captured: '2026-09-21',
@@ -85,10 +85,19 @@ export const SITES = [
         unitLabels: {
                     axle:   ['AXLE-01', 'AXLE-03', 'AXLE-04', 'AXLE-02'],
                   },
+        views: {
+            'cabinet': { azimuth: 347, elevation: -20, distance: 9.3 },
+            'AXLE-01': { azimuth: 16, elevation: 11, distance: 5.5 },
+            'AXLE-02': { azimuth: 18, elevation: 10, distance: 11.4 },
+            'AXLE-03': { azimuth: 339, elevation: 16, distance: 5.0 },
+            'AXLE-04': { azimuth: 333, elevation: 5, distance: 10.3 },
+            'CAM 1': { azimuth: 148, elevation: 9, distance: 5.0 },
+            'CAM 2': { azimuth: 126, elevation: 10, distance: 5.0 },
+        }
     },
     {
         code: 'TPA',
-        name: 'TPA',                          // <- edit: display name
+        name: 'ท่าพระ',                          // <- edit: display name
         file: 'Model-glb/260921_TPA_VE.glb',
         sizeMB: 13.3,
         captured: '2026-09-21',
@@ -98,10 +107,18 @@ export const SITES = [
             axle:   ['AXLE-01', 'AXLE-04', 'AXLE-02', 'AXLE-03'],
             camera: ['CAM-02', 'CAM-01'],
         },
+        views: {
+            cabinet: {azimuth: 4, elevation: -12, distance: 13},
+            'weight': { azimuth: 359, elevation: -10, distance: 18.0 },
+            'AXLE-01': { azimuth: 320, elevation: 8, distance: 5.0 },
+            'AXLE-02': { azimuth: 322, elevation: 10, distance: 10.3 },
+            'CAM-01': { azimuth: 163, elevation: 8, distance: 5.0 },
+            'CAM-02': { azimuth: 343, elevation: 10, distance: 5.0 },
+        },
     },
     {
         code: 'BRC',
-        name: 'BRC',                          // <- edit: display name
+        name: 'บรมราชชนนี',                          // <- edit: display name
         file: 'Model-glb/260921_BRC_VE.glb',
         sizeMB: 16.6,
         captured: '2026-09-21',
@@ -112,11 +129,12 @@ export const SITES = [
         },
         views: {
             cabinet: {azimuth: 90, elevation: -12, distance: 12},
+            'weight': { azimuth: 90, elevation: -6, distance: 18.8 }
         },
     },
     {
         code: 'PM1-BWK',
-        name: 'PM1-BWK',                      // <- edit: display name
+        name: 'พุทธมณฑลสาย 1 - บางแวก',                      // <- edit: display name
         file: 'Model-glb/260921_PM1-BWK_VE.glb',
         sizeMB: 9.3,
         captured: '2026-09-21',
@@ -125,10 +143,14 @@ export const SITES = [
         unitLabels: {
             axle:   ['AXLE-04', 'AXLE-01', 'AXLE-03', 'AXLE-02'],
         },
+        views: {
+            'cabinet': { azimuth: 187, elevation: -7, distance: 14.7 },
+            'weight': { azimuth: 198, elevation: -7, distance: 20.7 },
+        }
     },
     {
         code: 'BKT',
-        name: 'BKT',                          // <- edit: display name
+        name: 'บางขุนเทียน',                          // <- edit: display name
         file: 'Model-glb/260921_BKT_VE.glb',
         sizeMB: 22.3,
         captured: '2026-09-21',
@@ -138,6 +160,10 @@ export const SITES = [
             axle:   ['AXLE-04', 'AXLE-02', 'AXLE-03', 'AXLE-01'],
             camera: ['CAM-02', 'CAM-01'],
         },
+        views: {
+            'cabinet': { azimuth: 194, elevation: -16, distance: 13.9 },
+            'weight': { azimuth: 154, elevation: -12, distance: 19.8 },
+        }
     },
 ];
 
