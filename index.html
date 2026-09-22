@@ -28,62 +28,52 @@
 </head>
 <body>
     <canvas id="scene"></canvas>
-    <div id="pierLabels"></div>
 
     <header id="topbar" class="panel">
         <span class="brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</span>
         <button id="siteBtn" class="btn" aria-haspopup="dialog">
-            <span class="nm wrap-any" id="siteName">Site</span>
+            <span class="nm" id="siteName">Choose bridge</span>
             <span class="caret" aria-hidden="true">&#9662;</span>
         </button>
-        <button id="compassBtn" class="btn" aria-pressed="false"
-                title="Turn the view to face the same way as the phone">Compass</button>
     </header>
 
-    <button id="panelOpen" class="btn" aria-label="Show sensor types" aria-expanded="false">
+    <!--
+      The sensor menu is a strip rather than a sidebar: it used to cover the
+      left third of a phone screen, which is where the bridge is. The chips
+      scroll sideways when they have to; the tail never does, so All, Floor
+      and the collapse control are always under your thumb.
+    -->
+    <div id="typeBar" class="panel" role="group" aria-label="Sensor types">
+        <div class="tb-row">
+            <div class="chips" id="typeList"></div>
+            <div class="tail">
+                <button class="btn small" id="allBtn" aria-pressed="false"
+                        title="Light every sensor type at once">All</button>
+                <button class="btn small" id="floorBtn" aria-pressed="true"
+                        title="Show or hide the ground under the bridge">Floor</button>
+                <button class="btn small ico" id="panelClose" aria-label="Hide the sensor menu">
+                    <span aria-hidden="true">&#9650;</span>
+                </button>
+            </div>
+        </div>
+        <div class="units" id="unitList" hidden></div>
+    </div>
+
+    <button id="panelOpen" class="btn" aria-label="Show the sensor menu" aria-expanded="true">
         <span aria-hidden="true">&#9776;</span>
     </button>
 
-    <aside id="sidePanel" class="panel" aria-label="Sensor types">
-        <div class="sp-head">
-            <span>Sensor type</span>
-            <button id="panelClose" aria-label="Hide panel"><span aria-hidden="true">&#8249;</span></button>
-        </div>
-        <div id="typeList"></div>
-        <div class="sp-foot">
-            <button class="btn small" id="pierBtn" aria-pressed="false">Piers</button>
-            <button class="btn small" id="overviewBtn">Overview</button>
-        </div>
-    </aside>
-
-    <section id="calib" class="panel" aria-label="Compass alignment">
-        <div class="ch">
-            <span>Compass</span>
-            <span class="hdg" id="calHeading">&ndash;</span>
-        </div>
-        <div class="cnote">
-            Drag the view until it matches what is in front of you &mdash; the alignment is saved for this bridge.
-        </div>
-        <div class="crow">
-            <button class="btn small nudge" data-nudge="-5">&minus;5&deg;</button>
-            <button class="btn small" id="calAlign">Align to this view</button>
-            <button class="btn small nudge" data-nudge="5">+5&deg;</button>
-        </div>
-        <div class="crow" style="margin-top:8px">
-            <button class="btn small" id="calTilt" aria-pressed="false">Follow tilt: Off</button>
-            <button class="btn small" id="calReset">Reset</button>
-        </div>
-        <div class="off" id="calOffset"></div>
-    </section>
-
-    <div id="picker" role="dialog" aria-modal="true" aria-label="Choose bridge">
+    <!-- The front door. Shown from the first paint, because nothing loads
+         until a bridge is chosen. -->
+    <div id="picker" class="show" role="dialog" aria-modal="true" aria-label="Choose bridge">
+        <div class="pbrand">BMA&nbsp;<b>BWIM</b>&nbsp;System</div>
         <h2>Choose bridge</h2>
         <div class="ph">Tap a bridge to load its model.</div>
         <div class="list" id="siteList"></div>
-        <button class="btn" id="pickerClose">Close</button>
+        <button class="btn" id="pickerClose" hidden>Close</button>
     </div>
 
-    <div id="loader">
+    <div id="loader" class="hide" style="display:none">
         <div class="lt" id="loadTitle">BMA BWIM System</div>
         <div class="ls" id="loadSub">Starting&hellip;</div>
         <div class="bar"><div class="fill" id="loadFill"></div></div>

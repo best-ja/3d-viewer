@@ -38,6 +38,9 @@
  * before it was revised - so the camera type resolves positions from the nodes
  * and works whether or not there is geometry hanging off them. report() warns
  * when a model arrives with none.
+ *
+ * detectGround() is here too. It finds no equipment, but it is the same job -
+ * something the exports do not name, recognised by its shape and where it sits.
  */
 import * as THREE from 'three';
 
@@ -90,15 +93,24 @@ const CAB = {
     MAX_PART: 1.3,
 };
 
+/**
+ * unitFraming  how to frame ONE unit, when that differs from the whole type.
+ *              Zooming to a single detector has to come in over the road - see
+ *              the roadside note in viewer.js.
+ * short        what the chip says on a narrow screen, where the full label
+ *              would push the strip into a sideways scroll.
+ * framing      'under' is also read as "this shot goes below the deck", which
+ *              is what drops the floor out of the way. See js/main.js.
+ */
 export const SENSOR_TYPES = [
-    // unitFraming: how to frame ONE unit, when that differs from the whole
-    // type. Zooming to a single detector has to come in over the road - see the
-    // roadside note in viewer.js.
-    { key: AXLE,    label: 'AXLE DETECTOR', color: 0x22d3ee, css: '#22d3ee', framing: 'above',
-      unitFraming: 'roadside' },
-    { key: CAMERA,  label: 'CAMERA',        color: 0xc084fc, css: '#c084fc', framing: 'outside' },
-    { key: WEIGHT,  label: 'WEIGHT SENSOR', color: 0xfbbf24, css: '#fbbf24', framing: 'under' },
-    { key: CABINET, label: 'CAS / BTS',     color: 0x34d399, css: '#34d399', framing: 'under' },
+    { key: AXLE,    label: 'AXLE DETECTOR', short: 'AXLE',    color: 0x22d3ee, css: '#22d3ee',
+      framing: 'above', unitFraming: 'roadside' },
+    { key: CAMERA,  label: 'CAMERA',        short: 'CAM',     color: 0xc084fc, css: '#c084fc',
+      framing: 'outside' },
+    { key: WEIGHT,  label: 'WEIGHT SENSOR', short: 'WEIGHT',  color: 0xfbbf24, css: '#fbbf24',
+      framing: 'under' },
+    { key: CABINET, label: 'CAS / BTS',     short: 'CAS·BTS', color: 0x34d399, css: '#34d399',
+      framing: 'under' },
 ];
 
 /** Name reduced to lowercase alphanumerics, so spaces, underscores, hyphens
@@ -206,7 +218,7 @@ export function detectSensors(model) {
     groups[WEIGHT].count = plates.weight.points.length;
     groups[CABINET].count = cabinet.points.length;
 
-    report(groups, conduit, plates, shells, model);
+    report(groups, conduit, plates, shells);
     return groups;
 }
 
@@ -408,33 +420,7 @@ function collectCabinet(loose, anchors, claimed) {
     };
 }
 
-/**
- * Chainages of anything that looks like a pier column, logged as a starting
- * point for the `piers` list in js/sites.js. Reliable on TPA, SSW and BKT;
- * noisy on BRC and finds nothing on PM1-BWK - which is exactly why pier labels
- * are configured by hand rather than detected.
- */
-function pierHints(model) {
-    const { root, bbox, majorAxis } = model;
-    const lowWater = bbox.min.y + (bbox.max.y - bbox.min.y) * 0.35;
-    const box = new THREE.Box3(), size = new THREE.Vector3();
-    const at = [];
-    root.traverse(o => {
-        if (!o.isMesh) return;
-        box.setFromObject(o).getSize(size);
-        if (size.y < 1.5 || size.y < 1.6 * Math.max(size.x, size.z)) return;
-        if (box.min.y > lowWater) return;
-        at.push(box.getCenter(new THREE.Vector3())[majorAxis]);
-    });
-    const lines = [];
-    for (const v of at.sort((a, b) => a - b)) {
-        if (lines.length && Math.abs(v - lines[lines.length - 1]) < 3) continue;
-        lines.push(v);
-    }
-    return lines.slice(0, 20).map(v => +v.toFixed(1));
-}
-
-function report(groups, conduit, plates, shells, model) {
+function report(groups, conduit, plates, shells) {
     console.groupCollapsed('[sensors] detected');
     console.table(SENSOR_TYPES.map(t => ({
         type: t.label,
@@ -447,11 +433,6 @@ function report(groups, conduit, plates, shells, model) {
         '| cabinet plates', plates.cabinet.meshes.length,
         '| detector housing/plate meshes', shells,
         '| clusters without a plate', plates.noPlate);
-    const hints = pierHints(model);
-    if (hints.length) {
-        console.log(`pier hint - column lines along ${model.majorAxis} at: ${hints.join(', ')}`
-            + '  (a starting point for the `piers` list in js/sites.js - check them against the model)');
-    }
     for (const t of SENSOR_TYPES) {
         const us = groups[t.key].units;
         if (!us.length) continue;
@@ -468,117 +449,71 @@ function report(groups, conduit, plates, shells, model) {
 }
 
 /* ------------------------------------------------------------------ *
- * Piers and true north                                                *
+ * The ground                                                          *
  * ------------------------------------------------------------------ */
 
-/** Matched on the RAW name, not the punctuation-stripped key - the key helper
- *  drops non-ASCII, which would destroy "Pier 9 ขาออก". */
-const IS_PIER = /pier|ตอม่อ/i;
-/** A compass rose exported as four letter glyphs. */
-const IS_ROSE = /^([NESW])(#\d+)?(_\d+)?$/;
-/** Pier columns closer than this along the deck are one pier line. */
-const PIER_LINE = 3.0;
+/**
+ * Every node in these exports is called "Geom3D_", so the ground is found by
+ * its shape and its height, the same way the strain plates are.
+ *
+ * Measured over the five models in Model-glb/. Each carries one dominant slab
+ * in [Polished Concrete New] at the very bottom, covering 87-99% of the
+ * model's horizontal footprint:
+ *
+ *     BKT       15.9 x 0.20 x 79.0   y  0.00.. 0.21   96%
+ *     BRC      130.6 x 0.31 x 20.4   y -0.31.. 0.00   99%
+ *     PM1-BWK   35.6 x 2.40 x 93.0   y -2.40.. 0.00   98%
+ *     SSW        7.5 x 0.62 x 79.6   y -0.62.. 0.00   87%
+ *     TPA       18.1 x 0.65 x 81.0   y  0.00.. 0.65   91%
+ *
+ * PM1-BWK crosses a canal, so its ground is four pieces, not one: the slab
+ * plus two 6.5 x 93 m asphalt strips (17.8% each) and the translucent-blue
+ * water sheet below them (13.7%). Take the slab alone there and the bridge
+ * floats over a hovering blue rectangle.
+ *
+ * The largest thing that must SURVIVE is SSW's four 3.8 m pile caps, at 2.1%.
+ * Nothing in any model falls between 2.1% and 13.7%, so the 10% cut has 1.8x
+ * of margin either side of it.
+ */
+const GROUND = {
+    /** The box must sit wholly below this fraction of the model's height. */
+    CEILING: 0.15,
+    /** And cover at least this much of its horizontal footprint. */
+    FOOTPRINT: 0.10,
+};
 
 /**
- * Undo what the exporter and GLTFLoader do to a group name.
+ * The modelled ground under a bridge.
  *
- * Spaces become underscores on export ("Pier 9 ขาออก" -> "Pier_9_ขาออก"), and
- * GLTFLoader appends _1, _2 ... to every repeat of a name it has already seen,
- * which stacks ("Pier_1_6"). So strip the trailing numeric suffixes first, then
- * put the spaces back.
- *
- * This is why pier groups should be named "Pier-02", not "Pier_02" - a trailing
- * underscore-number is indistinguishable from a de-duplication suffix.
+ * @returns { meshes, top } - `top` is the highest point of it, which is the
+ *          surface an inspector stands on. Not the same as `bbox.min.y`: on
+ *          PM1-BWK the slab is 2.4 m thick, so the two are 2.4 m apart and
+ *          only one of them is a floor.
  */
-const cleanLabel = n => (n || '')
-    .replace(/^Geom3D_/, '')
-    .replace(/(_\d+)+$/, '')
-    .replace(/_/g, ' ')
-    .trim();
+export function detectGround(model) {
+    const { root, bbox } = model;
+    const ceiling = bbox.min.y + (bbox.max.y - bbox.min.y) * GROUND.CEILING;
+    const area = (bbox.max.x - bbox.min.x) * (bbox.max.z - bbox.min.z);
+    const floor = area * GROUND.FOOTPRINT;
 
-/**
- * Pier name tags taken from the model.
- *
- * Pier numbers are only present if the designer named the pier groups - glTF
- * has no text primitive, so SketchUp Text and Dimension entities are dropped
- * on export and only group/component names survive. Where a model has none,
- * main.js falls back to the `piers` list in js/sites.js.
- *
- * Note a component *definition* name is shared by all its instances, so a
- * model can name its piers and still not identify them individually - BRC
- * reuses "Pier 9 ขาออก" at three locations. That warns rather than guessing.
- *
- * @returns {{label:string, position:THREE.Vector3}[]} one entry per pier line
- */
-export function detectPiers(model) {
-    const { root, majorAxis } = model;
-    const found = [];
-    (function walk(obj, inside) {
-        const hit = !inside && IS_PIER.test(obj.name || '');
-        if (hit) {
-            found.push({
-                label: cleanLabel(obj.name),
-                position: obj.getWorldPosition(new THREE.Vector3()),
-            });
-        }
-        for (const c of obj.children) walk(c, inside || hit);
-    })(root, false);
-    if (!found.length) return [];
-
-    // One tag per pier line, or TPA draws eight labels over four piers.
-    const lines = [];
-    for (const p of found.sort((a, b) => a.position[majorAxis] - b.position[majorAxis])) {
-        const last = lines[lines.length - 1];
-        if (last && Math.abs(p.position[majorAxis] - last.at) < PIER_LINE) last.members.push(p);
-        else lines.push({ at: p.position[majorAxis], members: [p] });
-    }
-    const piers = lines.map(l => ({
-        label: l.members[0].label,
-        position: l.members
-            .reduce((v, p) => v.add(p.position), new THREE.Vector3())
-            .divideScalar(l.members.length),
-    }));
-
-    const dupes = piers.map(p => p.label).filter((l, i, a) => a.indexOf(l) !== i);
-    if (dupes.length) {
-        console.warn(`[piers] ${piers.length} pier lines but repeated labels (${[...new Set(dupes)].join(', ')}). `
-            + 'These are component definition names shared by every instance - name each pier '
-            + 'instance (Entity Info) to tell them apart.');
-    }
-    console.log(`[piers] ${piers.length} from the model:`, piers.map(p => p.label).join(', '));
-    return piers;
-}
-
-/**
- * True north from a compass rose modelled as four letter glyphs (N/E/S/W).
- * @returns {number|null} bearing of the model's -Z axis, degrees clockwise
- *          from north - the same convention as bearingOfModelDir().
- */
-export function detectNorth(model) {
-    const marks = {};
-    model.root.traverse(o => {
-        const m = IS_ROSE.exec(o.name || '');
-        if (!m) return;
-        const box = new THREE.Box3().setFromObject(o);
-        if (!box.isEmpty()) marks[m[1]] = box.getCenter(new THREE.Vector3());
+    const box = new THREE.Box3();
+    const meshes = [];
+    let top = -Infinity;
+    root.traverse(o => {
+        if (!o.isMesh) return;
+        box.setFromObject(o);
+        if (box.max.y > ceiling) return;
+        if ((box.max.x - box.min.x) * (box.max.z - box.min.z) < floor) return;
+        meshes.push(o);
+        top = Math.max(top, box.max.y);
     });
-    if (!marks.N || !marks.S) return null;
 
-    const ns = new THREE.Vector3().subVectors(marks.N, marks.S);
-    if (ns.lengthSq() < 1e-4) return null;
-    // W->E must be square to S->N, or this is not a rose.
-    if (marks.E && marks.W) {
-        const we = new THREE.Vector3().subVectors(marks.E, marks.W);
-        const cos = Math.abs(ns.clone().setY(0).normalize().dot(we.setY(0).normalize()));
-        if (cos > 0.2) {
-            console.warn('[north] N/E/S/W found but not square - ignoring the rose.');
-            return null;
-        }
+    if (meshes.length) {
+        console.log(`[ground] ${meshes.length} mesh(es), surface at y ${top.toFixed(2)}`);
+    } else {
+        console.log('[ground] none in this model - nothing to hide.');
     }
-    const deg = -THREE.MathUtils.radToDeg(Math.atan2(ns.x, -ns.z));
-    const bearing = ((deg % 360) + 360) % 360;
-    console.log(`[north] compass rose found - model -Z bears ${bearing.toFixed(1)}°`);
-    return bearing;
+    return { meshes, top: meshes.length ? top : null };
 }
 
 /* ------------------------------------------------------------------ *

@@ -1,8 +1,9 @@
 /**
  * Boot and wiring.
  *
- * Deep links: ?site=BKT, optionally &type=axle and &unit=axle-2, so a view can
- * be sent to someone else as a plain URL.
+ * Nothing loads until a bridge is chosen: every visit starts at the picker.
+ * A link can still carry a view - ?site=BKT&type=axle,weight&unit=axle-2 - and
+ * the bridge it names is pre-selected in the picker, one tap away.
  */
 /**
  * js/sites.js is the one file that gets edited between reloads, so it is
@@ -13,8 +14,7 @@
  */
 const { SITES, getSite } = await import(`./sites.js?t=${Date.now()}`);
 import { createViewer } from './viewer.js';
-import { detectSensors, detectPiers, detectNorth, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
-import { createCompass } from './compass.js';
+import { detectSensors, detectGround, createHighlighter, SENSOR_TYPES, CAMERA } from './sensors.js';
 import { createUI } from './ui.js';
 
 const LAST_SITE_KEY = 'bwim.lastSite';
@@ -23,33 +23,59 @@ const store = {
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 
-const viewer = createViewer({
-    canvas: document.getElementById('scene'),
-    labelsEl: document.getElementById('pierLabels'),
-});
+const viewer = createViewer({ canvas: document.getElementById('scene') });
 
 let site = null;          // current site record
 let groups = null;        // { axle, camera, weight, cabinet } from detectSensors
 let highlighter = null;
-let selection = { type: null, unitId: null };
-let piersOn = false;
-let piers = [];           // resolved [{ label, position }]
+let selection = { types: [], unitId: null };
+let floorOverride = null; // null = follow the selection; see floorWanted()
 let loading = false;
 
 const typeDef = k => SENSOR_TYPES.find(t => t.key === k) || null;
+/** Panel order, so a selection reads the same however it was assembled. */
+const ORDER = SENSOR_TYPES.map(t => t.key);
 
 /* ------------------------------------------------------------------ *
  * Selection                                                           *
  * ------------------------------------------------------------------ */
-function select(typeKey, unitId = null) {
+
+/**
+ * Light a set of types. Several at once is the normal case - every chip is a
+ * toggle, because a touch screen has no modifier to hold - and `unitId` only
+ * means anything when exactly one of them is lit.
+ */
+function select(types, unitId = null) {
     if (!groups) return;
-    const type = typeDef(typeKey);
-    selection = { type: type ? type.key : null, unitId: type ? unitId : null };
+    const keys = ORDER.filter(k => types.includes(k) && groups[k]);
+    selection = { types: keys, unitId: keys.length === 1 ? (unitId || null) : null };
 
-    highlighter.set(selection.type, selection.unitId);
-    ui.setActive(selection.type, selection.unitId);
+    // Any change of view hands the floor back to the automatic rule.
+    floorOverride = null;
+    applyFloor();
 
-    if (type) {
+    highlighter.set(keys, selection.unitId);
+    ui.setActive(selection.types, selection.unitId);
+    frameSelection();
+    syncUrl();
+}
+
+const toggleType = key => select(selection.types.includes(key)
+    ? selection.types.filter(k => k !== key)
+    : [...selection.types, key]);
+
+/** Select-all, and off again once everything is on. */
+function toggleAll() {
+    const lit = ORDER.filter(k => groups?.[k]?.count);
+    select(selection.types.length === lit.length ? [] : lit);
+}
+
+function frameSelection() {
+    const keys = selection.types;
+    if (!keys.length) { viewer.frameModel(); return; }
+
+    if (keys.length === 1) {
+        const type = typeDef(keys[0]);
         const unit = selection.unitId && groups[type.key].units.find(u => u.id === selection.unitId);
         viewer.frameBox(unit ? unit.box : groups[type.key].focus,
                         unit ? (type.unitFraming ?? type.framing) : type.framing,
@@ -65,27 +91,63 @@ function select(typeKey, unitId = null) {
         if (type.key === CAMERA && !groups[CAMERA].meshes.length) {
             ui.toast('This model has no camera geometry — showing the mounting position only.', 4200);
         }
-    } else {
-        viewer.frameModel();
+        return;
     }
-    syncUrl();
+
+    // Two or more: the union of what is lit, taken from off the side of the
+    // deck. `outside` works out at about 12 degrees above level, which is
+    // where the show screen's own fit settled for exactly this content - the
+    // roadside cameras 5 m up and the strain plates below the deck. A higher
+    // angle flattens that spread. Per-site `views` are keyed on one type or
+    // one unit, so a mixed shot takes none of them.
+    const box = new viewer.THREE.Box3();
+    const ignore = new Set();
+    for (const k of keys) {
+        const g = groups[k];
+        if (g.focus && !g.focus.isEmpty()) box.union(g.focus);
+        for (const m of g.meshes) ignore.add(m);
+    }
+    viewer.frameBox(box, 'outside', { ignore, label: keys.join(' + ') });
 }
 
 function syncUrl() {
     if (!site) return;
     const p = new URLSearchParams();
     p.set('site', site.code);
-    if (selection.type) p.set('type', selection.type);
+    if (selection.types.length) p.set('type', selection.types.join(','));
     if (selection.unitId) p.set('unit', selection.unitId);
-    history.replaceState(null, '', `${location.pathname}?${p}`);
+    // URLSearchParams escapes the separator to %2C. A comma is legal in a query
+    // string and nothing else here can contain one - site codes, type keys and
+    // unit ids are all plain ASCII - so put it back, for a link people read.
+    history.replaceState(null, '', `${location.pathname}?${p}`.replace(/%2C/g, ','));
 }
 
 /* ------------------------------------------------------------------ *
- * Pier tags                                                           *
+ * The floor                                                           *
  * ------------------------------------------------------------------ */
-function applyPiers() {
-    viewer.setPierLabels(piersOn ? piers : []);
-    ui.setPiersState(piersOn, piers.length > 0);
+
+/**
+ * WEIGHT SENSOR and CAS / BTS are the two types framed from under the deck,
+ * and the ground is in the way of both - it fills the lower half of the shot
+ * and pins the camera above it. `framing` already records which those are, so
+ * the rule reads off that rather than naming the types again here.
+ *
+ * The button overrules it for the view you are in; changing the selection
+ * hands control back.
+ */
+const goesUnder = keys => keys.some(k => typeDef(k)?.framing === 'under');
+const floorWanted = () => floorOverride ?? !goesUnder(selection.types);
+
+function applyFloor() {
+    const shown = floorWanted();
+    viewer.setGroundVisible(shown);
+    ui.setFloorState(shown, viewer.hasGround);
+}
+
+/** No re-framing: dropping the floor mid-orbit should not fly the camera. */
+function toggleFloor() {
+    floorOverride = !floorWanted();
+    applyFloor();
 }
 
 /**
@@ -125,66 +187,17 @@ function viewFor(type, unit) {
     return v[type.key];
 }
 
-/**
- * Pier tags come from the model when the designer named the pier groups, and
- * from the `piers` list in js/sites.js when they did not. glTF has no text
- * primitive, so SketchUp Text entities do not survive export - only names do.
- */
-function resolvePiers(model) {
-    const detected = detectPiers(model);
-    if (detected.length) return detected;
-    return (site.piers || [])
-        .map(p => ({ label: p.label, position: viewer.pointAtChainage(p.at) }))
-        .filter(p => p.position);
-}
-
 /* ------------------------------------------------------------------ *
  * UI                                                                  *
  * ------------------------------------------------------------------ */
 const ui = createUI({
     onOpenPicker: () => { ui.buildPicker(SITES, site?.code); ui.openPicker(); },
-    onChooseSite: s => loadSite(s),
-    onSelectType: k => select(k),
-    onSelectUnit: (k, unitId) => select(k, unitId),
-    onOverview: () => select(null),
-    onTogglePiers: () => { piersOn = !piersOn; applyPiers(); },
-    onCompassToggle: () => (compass.active ? stopCompass() : startCompass()),
-    onCalibrate: (what, arg) => {
-        if (what === 'align') {
-            ui.toast(compass.alignToCurrentView()
-                ? 'Aligned. Saved for this bridge.'
-                : 'No heading yet — wait for the compass to settle.');
-        } else if (what === 'nudge') {
-            compass.nudge(arg);
-        } else if (what === 'reset') {
-            compass.resetOffset();
-            ui.toast('Alignment reset.');
-        } else if (what === 'tilt') {
-            const on = !compass.tiltEnabled;
-            compass.setTiltEnabled(on);
-            ui.setTiltState(on);
-        }
-    },
+    onChooseSite: s => choose(s),
+    onToggleType: k => toggleType(k),
+    onSelectUnit: (k, unitId) => select([k], unitId),
+    onAll: () => toggleAll(),
+    onToggleFloor: () => toggleFloor(),
 });
-
-/* ------------------------------------------------------------------ *
- * Compass                                                             *
- * ------------------------------------------------------------------ */
-const compass = createCompass(viewer, {
-    onStatus: state => ui.setCompassState(state),
-    onReading: r => ui.setCompassReading(r),
-});
-
-async function startCompass() {
-    if (!site) { ui.toast('Load a bridge first.'); return; }
-    ui.setCompassState('waiting');
-    const ok = await compass.start();
-    if (!ok) ui.setCompassState('off');
-}
-function stopCompass() {
-    compass.stop();
-    ui.setCompassState('off');
-}
 
 /* ------------------------------------------------------------------ *
  * Site loading                                                        *
@@ -196,10 +209,9 @@ async function loadSite(next, want = {}) {
     highlighter?.dispose();
     highlighter = null;
     groups = null;
-    piers = [];
-    selection = { type: null, unitId: null };
-    ui.setActive(null);
-    if (compass.active) stopCompass();
+    selection = { types: [], unitId: null };
+    floorOverride = null;
+    ui.setActive([]);
 
     ui.loader.show(next.name, `${next.code} · ${next.sizeMB} MB`);
 
@@ -219,12 +231,7 @@ async function loadSite(next, want = {}) {
         console.log(`[config] ${site.code} from js/sites.js - `
             + (cfg.length ? cfg.join(', ') : 'nothing configured'));
 
-        // A model that carries an N/E/S/W compass rose already knows which way
-        // it faces, so there is nothing for the inspector to calibrate.
-        const north = detectNorth(model);
-        compass.setSite(site.code, north ?? site.northOffsetDeg,
-                        north != null || site.northOffsetDeg != null);
-        piers = resolvePiers(model);
+        viewer.setGround(detectGround(model));
 
         groups = detectSensors(model);
         applyUnitConfig();
@@ -232,17 +239,17 @@ async function loadSite(next, want = {}) {
 
         ui.setSite(site);
         ui.setTypes(SENSOR_TYPES.map(t => ({
-            key: t.key, label: t.label, css: t.css,
+            key: t.key, label: t.label, short: t.short, css: t.css,
             count: groups[t.key].count,
             units: groups[t.key].units.map(u => ({ id: u.id, label: u.label })),
         })));
-        ui.setTiltState(compass.tiltEnabled);
-        applyPiers();
+        applyFloor();
 
         viewer.frameModel();
         ui.loader.hide();
 
-        if (want.type) select(want.type, want.unit);
+        const wanted = (want.type || '').split(',').filter(Boolean);
+        if (wanted.length) select(wanted, want.unit);
         else syncUrl();
     } catch (err) {
         console.error('[main] model load failed', err);
@@ -259,27 +266,42 @@ async function loadSite(next, want = {}) {
 viewer.start();
 
 const params = new URLSearchParams(location.search);
-const initial = getSite(params.get('site')) || getSite(store.get(LAST_SITE_KEY));
+const linked = getSite(params.get('site'));
 
 /**
- * Print where the camera is now, in the form js/sites.js wants. Select a
- * sensor, orbit until it looks right, call this, paste the line into `views`.
- * See CONFIG.md.
+ * What a shared link asked for, held until the bridge it names is picked. Pick
+ * a different one and it is dropped: ?unit=axle-3 means nothing on another
+ * model, and silently applying half of it would be worse than none.
+ */
+let pending = linked ? { type: params.get('type'), unit: params.get('unit') } : null;
+
+function choose(s) {
+    const want = (pending && s === linked) ? pending : {};
+    pending = null;
+    loadSite(s, want);
+}
+
+/**
+ * Print where the camera is now, in the form js/sites.js wants. Light one
+ * sensor type, orbit until it looks right, call this, paste the line into
+ * `views`. See CONFIG.md.
  */
 window.bwimView = () => {
     if (!site || !groups) { console.log('Load a bridge first.'); return null; }
     const a = viewer.currentAngles();
-    const type = selection.type ? typeDef(selection.type) : null;
+    if (selection.types.length !== 1) {
+        console.log('Light exactly one sensor type, then orbit and call bwimView() again — '
+            + '`views` is keyed on one type or one unit.');
+        return { site: site.code, types: [...selection.types], ...a };
+    }
+    const type = typeDef(selection.types[0]);
     const unit = selection.unitId
-        ? groups[selection.type].units.find(u => u.id === selection.unitId) : null;
-    const key = unit ? unit.label : type?.key;
-    console.log(`${site.code} · ${type ? type.key : 'overview'}`
-        + (unit ? ` · ${unit.label}` : ''));
-    console.log(key
-        ? `views: { '${key}': { azimuth: ${Math.round(a.azimuth)}, `
-          + `elevation: ${Math.round(a.elevation)}, distance: ${a.distance.toFixed(1)} } }`
-        : 'Select a sensor type first, then orbit and call bwimView() again.');
-    return { site: site.code, type: type?.key ?? null, unit: unit?.label ?? null, ...a };
+        ? groups[type.key].units.find(u => u.id === selection.unitId) : null;
+    const key = unit ? unit.label : type.key;
+    console.log(`${site.code} · ${type.key}` + (unit ? ` · ${unit.label}` : ''));
+    console.log(`views: { '${key}': { azimuth: ${Math.round(a.azimuth)}, `
+        + `elevation: ${Math.round(a.elevation)}, distance: ${a.distance.toFixed(1)} } }`);
+    return { site: site.code, type: type.key, unit: unit?.label ?? null, ...a };
 };
 
 // Debug seam, off unless ?debug=1 is in the URL. Lets the test harness assert
@@ -294,15 +316,16 @@ if (params.has('debug')) {
         get site() { return site; },
         get groups() { return groups; },
         get selection() { return selection; },
-        get piers() { return piers; },
-        compass,
+        get floor() {
+            return {
+                shown: viewer.groundShown,
+                available: viewer.hasGround,
+                override: floorOverride,
+            };
+        },
+        select, toggleType, toggleAll, toggleFloor, loadSite,
     };
 }
 
-ui.buildPicker(SITES, initial?.code);
-if (initial) {
-    loadSite(initial, { type: params.get('type'), unit: params.get('unit') });
-} else {
-    ui.loader.hide();
-    ui.openPicker();
-}
+ui.buildPicker(SITES, (linked || getSite(store.get(LAST_SITE_KEY)))?.code);
+ui.openPicker();

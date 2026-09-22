@@ -18,7 +18,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { HIGHLIGHT_LAYER } from './sensors.js';
 import { loadGLB } from './model.js';
 
@@ -27,7 +26,7 @@ const easeInOut = k => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 
 /** Coarse pointer == phone/tablet. Drives the quality/battery trade-offs. */
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 
-export function createViewer({ canvas, labelsEl }) {
+export function createViewer({ canvas }) {
     /* ---------------- renderer ---------------- */
     const renderer = new THREE.WebGLRenderer({
         canvas,
@@ -110,6 +109,12 @@ export function createViewer({ canvas, labelsEl }) {
     /* ---------------- model ---------------- */
     let model = null;   // { root, bbox, center, size, span, majorAxis, minorAxis }
 
+    /* The modelled ground, found by js/sensors.js and handed over here so the
+       camera can take account of it. `bare` is the model's bounds without it,
+       which is what the overview frames once it is hidden. */
+    let ground = { meshes: [], top: null, bare: null };
+    let groundShown = true;
+
     function disposeObject(root) {
         const seenGeo = new Set(), seenMat = new Set();
         root.traverse(o => {
@@ -126,7 +131,7 @@ export function createViewer({ canvas, labelsEl }) {
     }
 
     function clearModel() {
-        clearPierLabels();
+        ground = { meshes: [], top: null, bare: null };
         if (!model) return;
         scene.remove(model.root);
         disposeObject(model.root);
@@ -149,6 +154,48 @@ export function createViewer({ canvas, labelsEl }) {
         invalidate();
         return model;
     }
+
+    /** @param found { meshes, top } from detectGround(). */
+    function setGround(found) {
+        const bare = new THREE.Box3();
+        if (found?.meshes?.length) {
+            const skip = new Set(found.meshes);
+            model.root.traverse(o => {
+                if (o.isMesh && !skip.has(o)) bare.union(new THREE.Box3().setFromObject(o));
+            });
+        }
+        ground = {
+            meshes: found?.meshes || [],
+            top: found?.top ?? null,
+            bare: bare.isEmpty() ? null : bare,
+        };
+        applyGround();
+    }
+
+    function setGroundVisible(on) {
+        if (groundShown === !!on) return;
+        groundShown = !!on;
+        applyGround();
+    }
+
+    function applyGround() {
+        for (const m of ground.meshes) m.visible = groundShown;
+        invalidate();
+    }
+
+    /** What the overview frames: the whole model, or what is left of it. */
+    const visibleBox = () => (groundShown || !ground.bare ? model.bbox : ground.bare);
+
+    /**
+     * How low the camera may go in `under` mode.
+     *
+     * With the ground shown this is standing height on its SURFACE - not
+     * `bbox.min.y`, which is the underside of the slab and on PM1-BWK sits
+     * 2.4 m below the ground you would be standing on. With the ground hidden
+     * there is nothing left to be inside, so the camera is free to drop below
+     * the girders and look straight up.
+     */
+    const standY = () => (groundShown && ground.top !== null ? ground.top + 1.6 : -Infinity);
 
     /* ---------------- framing ---------------- */
     // Distance at which a sphere of this radius fits. Both FOV axes matter: a
@@ -248,11 +295,7 @@ export function createViewer({ canvas, labelsEl }) {
         const side = (Math.sign(off) || 1) * (view?.flip ? -1 : 1);
 
         const target = centre.clone();
-        let radius = box.getBoundingSphere(_sphere).radius;
-        if (mode === 'overview') {
-            target.copy(model.center);
-            radius = model.bbox.getBoundingSphere(_sphere).radius;
-        }
+        const radius = box.getBoundingSphere(_sphere).radius;
         const D = Math.max(fitRadius(Math.max(radius, 1.5)), 5);
 
         // Each mode reduces to a horizontal direction plus, for `under`, a
@@ -261,17 +304,17 @@ export function createViewer({ canvas, labelsEl }) {
         let baseDir;
         const geometryFor = d => {
             if (mode !== 'under') return { reach: d, eyeY: null };
-            const eyeY = Math.min(target.y - 0.8,
-                                  Math.max(model.bbox.min.y + 1.6, target.y - d * 0.7));
+            const eyeY = Math.min(target.y - 0.8, Math.max(standY(), target.y - d * 0.7));
             const drop = target.y - eyeY;
             return { reach: Math.sqrt(Math.max(d * d - drop * drop, (d * 0.4) ** 2)), eyeY };
         };
         if (mode === 'under') {
             // Stand in the space under the deck: below the girders, but above
-            // the ground. Several sites model the ground as a large plane, and
+            // the ground - every site models the ground as a large slab, and
             // dropping through it fills the screen with its unlit underside.
-            // With the height pinned, the stand-off is taken along the bridge,
-            // which is also the view an inspector actually has down there.
+            // Hide the floor and that constraint goes with it. With the height
+            // pinned, the stand-off is taken along the bridge, which is also
+            // the view an inspector actually has down there.
             target.y = box.min.y;
             baseDir = along.clone().negate().addScaledVector(across, 0.3 * side).setY(0).normalize();
         } else if (mode === 'above') {
@@ -328,11 +371,13 @@ export function createViewer({ canvas, labelsEl }) {
             for (const k of pinned) shot[k] = view[k];
             eye = eyeFromAngles(target, shot);
             if (mode === 'under') {
-                // Never let a hand-set elevation drop through the ground plane.
-                const floor = model.bbox.min.y + 1.6;
+                // Never let a hand-set elevation drop through the ground - but
+                // only while there is a ground to drop through.
+                const floor = standY();
                 if (eye.y < floor) {
                     eye.setY(floor);
-                    console.warn(`[view] ${label || mode} elevation clamped to stay above the ground.`);
+                    console.warn(`[view] ${label || mode} elevation clamped to stay above the ground. `
+                        + 'Hide the floor and it is taken as written.');
                 }
             }
             const n = blockedCount(eye, target, ignore);
@@ -367,54 +412,7 @@ export function createViewer({ canvas, labelsEl }) {
         flyTo(eye, target);
     }
 
-    const frameModel = () => model && frameBox(model.bbox, 'overview');
-
-    /* ---------------- pier name tags ----------------
-       Pier numbers come from the `piers` list in js/sites.js - they are not in
-       the model files. The label renderer only runs when there are labels, so
-       with the toggle off this costs nothing. */
-    const pierGroup = new THREE.Group();
-    scene.add(pierGroup);
-    const labelRenderer = new CSS2DRenderer({ element: labelsEl });
-    labelRenderer.setSize(innerWidth, innerHeight);
-
-    function clearPierLabels() {
-        for (const o of [...pierGroup.children]) {
-            o.element?.remove();
-            pierGroup.remove(o);
-        }
-        invalidate();
-    }
-
-    /** Tag height: high on the structure, so tags line up and read against the
-     *  sky whether they came from the model or from the sites.js list. */
-    const tagY = () => model.bbox.min.y + (model.bbox.max.y - model.bbox.min.y) * 0.82;
-
-    /** A point on the deck centreline at chainage `at` along the long axis. */
-    function pointAtChainage(at) {
-        if (!model || !Number.isFinite(at)) return null;
-        return new THREE.Vector3(
-            model.majorAxis === 'x' ? at : model.center.x,
-            tagY(),
-            model.majorAxis === 'x' ? model.center.z : at,
-        );
-    }
-
-    /** @param piers [{ label, position }] */
-    function setPierLabels(piers) {
-        clearPierLabels();
-        if (!model || !piers?.length) return;
-        for (const p of piers) {
-            if (!p?.position) continue;
-            const el = document.createElement('div');
-            el.className = 'pier-tag';
-            el.textContent = p.label;               // textContent: Thai-safe
-            const o = new CSS2DObject(el);
-            o.position.set(p.position.x, tagY(), p.position.z);
-            pierGroup.add(o);
-        }
-        invalidate();
-    }
+    const frameModel = () => model && frameBox(visibleBox(), 'overview');
 
     /* ---------------- render ---------------- */
     function render() {
@@ -429,7 +427,6 @@ export function createViewer({ canvas, labelsEl }) {
             renderer.render(scene, camera);
             camera.layers.set(0);
         }
-        if (pierGroup.children.length) labelRenderer.render(scene, camera);
     }
 
     function animate() {
@@ -459,7 +456,6 @@ export function createViewer({ canvas, labelsEl }) {
         camera.aspect = innerWidth / innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
-        labelRenderer.setSize(innerWidth, innerHeight);
         invalidate();
     }
     addEventListener('resize', resize);
@@ -476,7 +472,9 @@ export function createViewer({ canvas, labelsEl }) {
         onFrame: cb => { frameCbs.push(cb); return () => detach(frameCbs, cb); },
         onBeforeRender: cb => { beforeRenderCbs.push(cb); return () => detach(beforeRenderCbs, cb); },
         setOverlay(on) { overlay = !!on; invalidate(); },
-        setPierLabels, clearPierLabels, pointAtChainage,
+        setGround, setGroundVisible,
+        get groundShown() { return groundShown; },
+        get hasGround() { return ground.meshes.length > 0; },
         /** Where the camera is now, in the same terms js/sites.js uses. */
         currentAngles: () => anglesFromEye(controls.target, camera.position),
         start: animate,

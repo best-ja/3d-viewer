@@ -31,7 +31,7 @@ Axle detectors and cameras are numbered along the deck by default: `AXLE 1`…`A
 
 **The names are assigned along the deck, then the list is sorted by name.** The first name in the
 array goes to the first sensor from the low-chainage end of the bridge, the second to the next, and
-so on — but the side panel shows them in name order. So if the real numbering runs against the deck
+so on — but the unit row shows them in name order. So if the real numbering runs against the deck
 direction, write the names in deck order and the panel still reads correctly:
 
 ```js
@@ -60,7 +60,7 @@ Weight sensors and CAS / BTS have no individual names — they are always shown 
 
 ## Setting the camera angle
 
-When you tap a sensor type, or one sensor, the camera flies to it. **It picks the angle itself:** it
+When you light a sensor type, or one sensor, the camera flies to it. **It picks the angle itself:** it
 looks along the line it is about to use, and if a girder, barrier or crossbeam is in the way it
 swings round and, if that is not enough, moves in closer until it has a clear shot.
 
@@ -216,8 +216,8 @@ matched. For one sensor, the key must be the name **exactly** as the panel shows
 | `[labels] BKT.unitLabels.axle has 3 name(s) but 4 unit(s) were detected - ignoring it` | The list length must match exactly. Nothing is renamed until it does. |
 | `[view] camera / CAM-01 pinned to azimuth 312 but 2 object(s) block it` | Your angle looks into something. Pick another, or delete the entry and let it choose. |
 | `[view] no clear angle for under; best of 24 tried still has 3 object(s) in the way` | It could not find a clean shot anywhere and used the least bad one. Usually means the sensors really are boxed in. |
-| `[view] weight elevation clamped to stay above the ground` | An under-deck elevation was steep enough to put the camera below ground level, so it was pulled back up. |
-| `[piers] 4 pier lines but repeated labels (Pier)` | The model names its pier *component*, not each pier. See [README](README.md#pier-name-tags). |
+| `[view] weight elevation clamped to stay above the ground` | An under-deck elevation was steep enough to put the camera through the ground, so it was pulled back up. Press **Floor** to drop the ground and the angle is taken as written. |
+| `[ground] none in this model - nothing to hide` | No mesh is both low enough and broad enough to be the ground. The **Floor** button is disabled and under-deck shots keep their guard. |
 
 ---
 
@@ -230,13 +230,6 @@ matched. For one sensor, the key must be the name **exactly** as the panel shows
     file: 'Model-glb/260921_BKT_VE.glb',      // case-sensitive on GitHub Pages
     sizeMB: 16.5,
     captured: '2026-09-21',
-
-    northOffsetDeg: null,                     // null = not surveyed. Ignored if the
-                                              // model has an N/E/S/W compass rose
-
-    piers: [],                                // fallback pier tags, only used when
-                                              // the model names none itself
-                                              //   { label: 'P13', at: 8.0 }
 
     unitLabels: {                             // optional
         axle:   ['A-01', 'A-02', 'A-03', 'A-04'],

@@ -3,7 +3,7 @@
  * turns interactions into callbacks for main.js.
  *
  * Every piece of site-supplied text goes in through textContent, so Thai bridge
- * and pier names render as written and can never be parsed as markup.
+ * names render as written and can never be parsed as markup.
  */
 const $ = id => document.getElementById(id);
 const PANEL_KEY = 'bwim.panelCollapsed';
@@ -28,11 +28,10 @@ function softColor(hex, a) {
 
 export function createUI(handlers) {
     const dom = {
-        siteBtn: $('siteBtn'), siteName: $('siteName'), compassBtn: $('compassBtn'),
-        typeList: $('typeList'), overviewBtn: $('overviewBtn'), pierBtn: $('pierBtn'),
+        siteBtn: $('siteBtn'), siteName: $('siteName'),
+        typeBar: $('typeBar'), typeList: $('typeList'), unitList: $('unitList'),
+        allBtn: $('allBtn'), floorBtn: $('floorBtn'),
         panelOpen: $('panelOpen'), panelClose: $('panelClose'),
-        calib: $('calib'), calHeading: $('calHeading'), calAlign: $('calAlign'),
-        calTilt: $('calTilt'), calReset: $('calReset'), calOffset: $('calOffset'),
         picker: $('picker'), siteList: $('siteList'), pickerClose: $('pickerClose'),
         loader: $('loader'), loadTitle: $('loadTitle'), loadSub: $('loadSub'),
         loadFill: $('loadFill'), loadPct: $('loadPct'), loadRetry: $('loadRetry'),
@@ -40,7 +39,7 @@ export function createUI(handlers) {
     };
 
     /* ------------------------------------------------------------------ *
-     * Bridge picker                                                       *
+     * Bridge picker - the front door, not a dialog                        *
      * ------------------------------------------------------------------ */
     function buildPicker(sites, currentCode) {
         dom.siteList.replaceChildren(...sites.map(site => {
@@ -65,82 +64,100 @@ export function createUI(handlers) {
     dom.pickerClose.addEventListener('click', closePicker);
 
     /* ------------------------------------------------------------------ *
-     * Sensor types and their per-unit submenus                            *
+     * Sensor types                                                        *
      * ------------------------------------------------------------------ */
-    let active = { type: null, unitId: null };
+    let types = [];                     // the entries setTypes() was given
+    let active = { types: [], unitId: null };
+    let unitsFor = null;                // which type the unit row is currently built for
+
+    const typeEntry = k => types.find(t => t.key === k) || null;
 
     function setTypes(entries) {
-        dom.typeList.replaceChildren(...entries.map(e => {
-            const hasUnits = e.units.length > 1;
-            const head = el('button', {
-                class: 'type', type: 'button', 'data-type': e.key,
-                'aria-pressed': 'false', 'aria-expanded': 'false',
+        types = entries || [];
+        unitsFor = null;
+        dom.typeList.replaceChildren(...types.map(e => {
+            const chip = el('button', {
+                class: 'chip', type: 'button', 'data-type': e.key,
+                'aria-pressed': 'false', title: e.label, 'aria-label': e.label,
             }, [
-                el('i', { class: 'bar' }),
-                el('span', { class: 't' }, [
-                    el('span', { class: 'tl', text: e.label }),
-                    el('span', { class: 'tn', text: e.count === 1 ? '1 unit' : `${e.count} units` }),
-                ]),
-                hasUnits ? el('span', { class: 'chev', 'aria-hidden': 'true', text: '›' }) : null,
+                el('span', { class: 'full', text: e.label }),
+                el('span', { class: 'short', text: e.short || e.label }),
             ]);
-            head.style.setProperty('--c', e.css);
-            head.style.setProperty('--c-soft', softColor(e.css, 0.18));
-            // Tapping the selected type again clears it.
-            head.addEventListener('click', () =>
-                handlers.onSelectType(active.type === e.key && !active.unitId ? null : e.key));
-
-            const subs = el('div', { class: 'subs' }, e.units.map(u => {
-                const b = el('button', {
-                    class: 'sub', type: 'button', 'data-unit': u.id,
-                    'aria-pressed': 'false', text: u.label,
-                });
-                b.style.setProperty('--c', e.css);
-                b.style.setProperty('--c-soft', softColor(e.css, 0.18));
-                b.addEventListener('click', () =>
-                    handlers.onSelectUnit(e.key, active.unitId === u.id ? null : u.id));
-                return b;
-            }));
-            return el('div', { class: 'type-row' }, hasUnits ? [head, subs] : [head]);
-        }));
-        setActive(active.type, active.unitId);
-    }
-
-    function setActive(type, unitId = null) {
-        active = { type: type || null, unitId: unitId || null };
-        for (const row of dom.typeList.children) {
-            const head = row.querySelector('.type');
-            const isType = head.dataset.type === active.type;
-            head.setAttribute('aria-pressed', String(isType && !active.unitId));
-            head.setAttribute('aria-expanded', String(isType));
-            const subs = row.querySelector('.subs');
-            if (subs) {
-                subs.classList.toggle('show', isType);
-                for (const b of subs.children) {
-                    b.setAttribute('aria-pressed', String(isType && b.dataset.unit === active.unitId));
-                }
+            chip.style.setProperty('--c', e.css);
+            chip.style.setProperty('--c-soft', softColor(e.css, 0.18));
+            if (!e.count) {
+                chip.disabled = true;
+                chip.title = `No ${e.label} in this model.`;
             }
+            chip.addEventListener('click', () => handlers.onToggleType(e.key));
+            return chip;
+        }));
+        setActive(active.types, active.unitId);
+    }
+
+    /**
+     * The unit row is only offered when exactly one type is lit: narrowing to
+     * one unit has no meaning across two types, and the highlighter ignores a
+     * unit id in that case anyway.
+     */
+    function buildUnits(entry) {
+        unitsFor = entry.key;
+        dom.unitList.replaceChildren(...entry.units.map(u => {
+            const b = el('button', {
+                class: 'unit', type: 'button', 'data-unit': u.id,
+                'aria-pressed': 'false', text: u.label,
+            });
+            b.style.setProperty('--c', entry.css);
+            b.style.setProperty('--c-soft', softColor(entry.css, 0.18));
+            b.addEventListener('click', () =>
+                handlers.onSelectUnit(entry.key, active.unitId === u.id ? null : u.id));
+            return b;
+        }));
+    }
+
+    function setActive(lit, unitId = null) {
+        active = { types: [...(lit || [])], unitId: unitId || null };
+
+        for (const chip of dom.typeList.children) {
+            chip.setAttribute('aria-pressed', String(active.types.includes(chip.dataset.type)));
         }
+
+        const solo = active.types.length === 1 ? typeEntry(active.types[0]) : null;
+        const show = !!solo && solo.units.length > 1;
+        if (show) {
+            if (unitsFor !== solo.key) buildUnits(solo);
+            for (const b of dom.unitList.children) {
+                b.setAttribute('aria-pressed', String(b.dataset.unit === active.unitId));
+            }
+        } else {
+            unitsFor = null;
+        }
+        dom.unitList.hidden = !show;
+
+        const all = types.filter(t => t.count).length;
+        const on = all > 0 && active.types.length === all;
+        dom.allBtn.classList.toggle('active', on);
+        dom.allBtn.setAttribute('aria-pressed', String(on));
+        dom.allBtn.title = on ? 'Turn every sensor type off' : 'Light every sensor type at once';
     }
 
-    dom.overviewBtn.addEventListener('click', () => handlers.onOverview());
+    dom.allBtn.addEventListener('click', () => handlers.onAll());
 
     /* ------------------------------------------------------------------ *
-     * Pier tags                                                           *
+     * The floor                                                           *
      * ------------------------------------------------------------------ */
-    dom.pierBtn.addEventListener('click', () => handlers.onTogglePiers());
+    dom.floorBtn.addEventListener('click', () => handlers.onToggleFloor());
 
-    function setPiersState(on, available) {
-        dom.pierBtn.disabled = !available;
-        dom.pierBtn.title = available
-            ? 'Show pier name tags'
-            : 'No piers in this model - name the pier groups in the export, '
-              + 'or list them in js/sites.js';
-        dom.pierBtn.classList.toggle('active', !!on && available);
-        dom.pierBtn.setAttribute('aria-pressed', String(!!on && available));
+    function setFloorState(shown, available) {
+        dom.floorBtn.disabled = !available;
+        dom.floorBtn.setAttribute('aria-pressed', String(!!shown && available));
+        dom.floorBtn.title = !available
+            ? 'This model has no ground under the bridge.'
+            : shown ? 'Hide the ground under the bridge' : 'Show the ground under the bridge';
     }
 
     /* ------------------------------------------------------------------ *
-     * Panel collapse                                                      *
+     * Strip collapse                                                      *
      * ------------------------------------------------------------------ */
     let collapsed = false;
     function setCollapsed(on, remember = true) {
@@ -152,58 +169,6 @@ export function createUI(handlers) {
     dom.panelClose.addEventListener('click', () => setCollapsed(true));
     dom.panelOpen.addEventListener('click', () => setCollapsed(false));
     try { setCollapsed(localStorage.getItem(PANEL_KEY) === '1', false); } catch { /* private mode */ }
-
-    /* ------------------------------------------------------------------ *
-     * Compass                                                             *
-     * ------------------------------------------------------------------ */
-    dom.compassBtn.addEventListener('click', () => handlers.onCompassToggle());
-    dom.calAlign.addEventListener('click', () => handlers.onCalibrate('align'));
-    dom.calReset.addEventListener('click', () => handlers.onCalibrate('reset'));
-    dom.calTilt.addEventListener('click', () => handlers.onCalibrate('tilt'));
-    dom.calib.querySelectorAll('[data-nudge]').forEach(b => {
-        b.addEventListener('click', () => handlers.onCalibrate('nudge', Number(b.dataset.nudge)));
-    });
-
-    const COMPASS_16 = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
-                        'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-    const cardinal = deg => COMPASS_16[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
-
-    const COMPASS_MESSAGES = {
-        insecure: 'Compass needs an https:// page. Over plain http it is blocked by the browser, '
-                + 'so use the deployed site rather than the local server.',
-        unsupported: 'This browser does not report device orientation.',
-        denied: 'Motion and orientation access was declined. Allow it in the browser settings to use compass mode.',
-        relative: 'This phone reports no true heading (no magnetometer). Using touch control instead.',
-        'no-data': 'No orientation data arrived from the phone. Using touch control instead.',
-    };
-
-    function setCompassState(state, reading) {
-        const on = state === 'ok' || state === 'waiting';
-        dom.compassBtn.classList.toggle('active', on);
-        dom.compassBtn.setAttribute('aria-pressed', String(on));
-        dom.compassBtn.textContent = state === 'waiting' ? 'Locating…' : 'Compass';
-        dom.calib.classList.toggle('show', on);
-        if (COMPASS_MESSAGES[state]) toast(COMPASS_MESSAGES[state], 5200);
-        if (reading) setCompassReading(reading);
-    }
-
-    const OFFSET_SOURCE = {
-        model: 'from the model compass rose',
-        saved: 'saved for this bridge',
-        unset: 'not surveyed — drag to align',
-    };
-
-    function setCompassReading({ heading, northOffset, source }) {
-        dom.calHeading.textContent = heading == null ? '–' : `${cardinal(heading)} ${heading.toFixed(0)}°`;
-        dom.calOffset.textContent = `Model north offset ${northOffset.toFixed(0)}° · `
-            + (OFFSET_SOURCE[source] || OFFSET_SOURCE.saved);
-    }
-
-    function setTiltState(on) {
-        dom.calTilt.textContent = `Follow tilt: ${on ? 'On' : 'Off'}`;
-        dom.calTilt.classList.toggle('active', on);
-        dom.calTilt.setAttribute('aria-pressed', String(on));
-    }
 
     /* ------------------------------------------------------------------ *
      * Loader + toast                                                      *
@@ -248,10 +213,15 @@ export function createUI(handlers) {
     /* ------------------------------------------------------------------ */
     return {
         buildPicker, openPicker, closePicker,
-        setSite(site) { dom.siteName.textContent = site.name; },
-        setTypes, setActive, setPiersState,
+        /** A bridge is up: name it, show the strip, and let the picker be
+         *  dismissed - until now there was nothing behind it to go back to. */
+        setSite(site) {
+            dom.siteName.textContent = site.name;
+            document.body.classList.add('has-model');
+            dom.pickerClose.hidden = false;
+        },
+        setTypes, setActive, setFloorState,
         setCollapsed, get collapsed() { return collapsed; },
-        setCompassState, setCompassReading, setTiltState,
         loader, toast,
     };
 }
