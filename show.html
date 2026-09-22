@@ -45,23 +45,14 @@
                 <div class="thai wrap-any" id="bigName"></div>
                 <div class="line">
                     <span class="code" id="bigCode"></span>
-                    <span class="chip" id="bigChip"></span>
+                    <!-- one chip per sensor type, built by js/show.js -->
+                    <span class="legend" id="bigLegend"></span>
                 </div>
             </div>
-            <div id="dwell" aria-hidden="true"><i></i></div>
             <div class="placeholder" id="bigWait">Loading&#8230;</div>
         </section>
 
         <section id="strip"><!-- four .cell.small, built by js/show.js --></section>
-    </div>
-
-    <div id="boot">
-        <div class="boot-box">
-            <div class="boot-brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</div>
-            <div class="boot-sub" id="bootSub">Preparing the display&#8230;</div>
-            <div class="boot-bar"><i id="bootFill"></i></div>
-            <ul class="boot-list" id="bootList"></ul>
-        </div>
     </div>
 
     <div id="fault" hidden></div>

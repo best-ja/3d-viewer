@@ -622,20 +622,36 @@ export function createHighlighter(viewer, groups) {
 
     return {
         get active() { return active; },
-        /** `unitId` narrows the highlight to a single unit of that type. */
+        /**
+         * Light one sensor type, or several at once by passing an array - the
+         * show screen lights everything on a bridge together, each type in its
+         * own colour. `unitId` narrows to a single unit and only applies when
+         * one type was asked for.
+         *
+         * A mesh classified into two groups is lit by whichever comes first
+         * and skipped after that: swapping it twice would stash the highlight
+         * material as its "original" and leave it tinted for good.
+         */
         set(typeKey, unitId = null) {
             clear();
-            const group = typeKey && groups[typeKey];
-            if (group) {
-                const unit = unitId && group.units.find(u => u.id === unitId);
-                lit = unit ? unit.meshes : group.meshes;
-                for (const mesh of lit) {
+            const keys = (Array.isArray(typeKey) ? typeKey : [typeKey]).filter(k => k && groups[k]);
+            let onlyUnit = null;
+
+            for (const key of keys) {
+                const group = groups[key];
+                const unit = keys.length === 1 && unitId && group.units.find(u => u.id === unitId);
+                if (unit) onlyUnit = unit;
+                for (const mesh of (unit ? unit.meshes : group.meshes)) {
+                    if (mesh.userData.origMaterial) continue;
                     mesh.userData.origMaterial = mesh.material;
-                    mesh.material = materials[typeKey];
+                    mesh.material = materials[key];
                     mesh.layers.set(HIGHLIGHT_LAYER);
+                    lit.push(mesh);
                 }
-                active = { type: typeKey, unitId: unit ? unit.id : null };
             }
+            // `type` stays a single key so existing callers read the same thing.
+            if (keys.length) active = { type: keys[0], types: keys, unitId: onlyUnit ? onlyUnit.id : null };
+
             viewer.setOverlay(!!active);
             viewer.invalidate();
         },

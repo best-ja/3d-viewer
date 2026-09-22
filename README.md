@@ -300,14 +300,20 @@ lever is a build-time `gltf-transform optimize` pass to produce smaller models.
 
 `show.html` is for the screen in the conference room. Open it, walk away, and it runs on its own:
 one big panel featuring a bridge with its name over it, four small panels showing the ones coming
-up. Every seven seconds the highlight steps to the next sensor type; after all three the feature
-moves to the next bridge. A full pass is about a minute and three quarters.
+up. Every fourteen seconds the feature moves to the next bridge, so a full pass is a little over a
+minute.
 
-It cycles **AXLE DETECTOR, WEIGHT SENSOR and CAS / BTS**. Cameras are left out on purpose.
+**AXLE DETECTOR, WEIGHT SENSOR and CAS / BTS are all lit at the same time**, each in its own
+colour, with a legend under the bridge name giving the colour and the count for each. Cameras are
+left out on purpose. Because everything is lit together, one camera move per bridge does the whole
+job — there is no stepping between subsystems.
 
-Everything worth changing is the `SHOW` block at the top of `js/show.js` — how long each type
-holds, how fast the orbit turns, how high the camera rides for each type, and how much bridge stays
-in frame around the equipment.
+There is no splash screen and no progress bar. The layout appears straight away and each panel
+fills in as its model lands, so nothing on screen ever looks like it is loading.
+
+Everything worth changing is the `SHOW` block at the top of `js/show.js` — how long each bridge
+holds, how fast the featured bridge turns against the ones waiting in the strip, how high the
+camera rides, and how much bridge stays in frame around the equipment.
 
 It needs no input, but for a presenter: **space** pauses, **left/right** step between bridges, and
 **f** goes fullscreen. `?dwell=12000` overrides the pacing without editing anything.
@@ -325,9 +331,19 @@ one per frame. That works because the renderer asks for `preserveDrawingBuffer`,
 skipped keeps the pixels it had instead of flickering to black. A frame comes to roughly 2 500–3 400
 draw calls, under twice what the inspector page already does on a phone.
 
-If the machine driving the TV cannot keep up, the page notices and hands work back by itself —
-first by refreshing the small panels less often, then by dropping resolution. It says so in the
-console. `?quality=0` pins it at full quality.
+If the machine driving the TV cannot keep up, the page notices and hands work back by itself, in
+the order that costs the least to look at:
+
+| level | frame cap | small panels | resolution |
+| --- | --- | --- | --- |
+| 0 | 60 fps | every frame | full |
+| 1 | 30 fps | every frame | 1x |
+| 2 | 30 fps | every third frame | 0.75x |
+
+Level 2 is the only one that shows, because redrawing the strip less often is what makes its orbit
+judder — which is also why the waiting bridges turn at 1.2°/s against the featured bridge's 3°/s,
+so that whatever the cadence, the step between redraws stays too small to read. The page logs each
+change of level to the console. `?quality=0` pins it at full.
 
 The camera never has to see past anything, because the highlight pass clears the depth buffer: the
 weight sensors and cabinets under the deck glow straight through it.

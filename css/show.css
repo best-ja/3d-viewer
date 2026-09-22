@@ -86,13 +86,15 @@ body.show.has-pointer { cursor: default; }
     color: var(--dim); text-transform: uppercase;
 }
 
-/* The sensor type currently lit, tinted to match the highlight colour.
-   --c is set from SENSOR_TYPES[i].css by js/show.js. */
+/* Every sensor type is lit at once, so the legend is what tells a visitor
+   which colour is which. One chip per type; --c is set from
+   SENSOR_TYPES[i].css by js/show.js. */
+.legend { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .chip {
     --c: var(--accent);
     display: inline-flex; align-items: center; gap: 8px;
     padding: 5px 13px;
-    font-size: clamp(12px, 1vw, 17px); font-weight: 600; letter-spacing: 0.6px;
+    font-size: clamp(11px, 0.92vw, 16px); font-weight: 600; letter-spacing: 0.6px;
     color: var(--c);
     border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
     background: color-mix(in srgb, var(--c) 14%, rgba(6, 9, 18, 0.72));
@@ -103,16 +105,9 @@ body.show.has-pointer { cursor: default; }
     content: ""; width: 9px; height: 9px; border-radius: 50%;
     background: var(--c); box-shadow: 0 0 10px var(--c);
 }
-
-/* Progress through the current sensor type, along the foot of the big panel. */
-#dwell {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
-    height: 3px; background: rgba(148, 163, 184, 0.16);
-}
-#dwell i {
-    display: block; height: 100%; width: 0;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent);
+.chip .n {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75; margin-left: 2px;
 }
 
 /* Dip to black on a bridge change: set to 1 with no transition, then to 0. */
@@ -146,34 +141,6 @@ body.show.has-pointer { cursor: default; }
 .placeholder[hidden] { display: none; }
 .placeholder.failed { color: var(--danger); }
 
-/* ---------- boot / loading ---------- */
-#boot {
-    position: fixed; inset: 0; z-index: 70;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--bg);
-    transition: opacity 600ms ease;
-}
-#boot.hide { opacity: 0; pointer-events: none; }
-.boot-box { width: min(560px, 82vw); text-align: center; }
-.boot-brand { font-size: 30px; color: var(--dim); margin-bottom: 8px; }
-.boot-brand b { color: var(--text); font-weight: 700; }
-.boot-sub { font-size: 15px; color: var(--dim); margin-bottom: 20px; }
-.boot-bar {
-    height: 5px; border-radius: 3px; overflow: hidden;
-    background: rgba(148, 163, 184, 0.16);
-}
-.boot-bar i {
-    display: block; height: 100%; width: 0;
-    background: var(--accent); transition: width 240ms ease;
-}
-.boot-list {
-    list-style: none; margin: 18px 0 0; padding: 0;
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px;
-    font-size: 13px; color: var(--dim);
-}
-.boot-list li.done { color: var(--text); }
-.boot-list li.failed { color: var(--danger); }
-
 /* ---------- hard failure (WebGL context lost, no bridges) ---------- */
 #fault {
     position: fixed; inset: 0; z-index: 90;
@@ -190,5 +157,5 @@ body.show.has-pointer { cursor: default; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #bigFade, .boot-bar i { transition: none; }
+    #bigFade { transition: none; }
 }
