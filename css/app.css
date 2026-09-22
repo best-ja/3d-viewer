@@ -120,28 +120,27 @@ body.panel-collapsed #typeBar {
     opacity: 0; pointer-events: none;
 }
 
-.tb-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-
-/* The chips scroll; the tail does not, so All, Floor and the collapse control
-   stay reachable however many types a bridge has. */
-.chips {
-    flex: 1 1 auto; min-width: 0;
-    display: flex; align-items: center; gap: 6px;
-    overflow-x: auto; overflow-y: hidden;
-    scrollbar-width: none; -webkit-overflow-scrolling: touch;
-}
-.chips::-webkit-scrollbar { display: none; }
-@media (max-width: 719px) {
-    /* Fade the right edge, so it is obvious there is more to the side. */
-    .chips {
-        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
-        mask-image: linear-gradient(90deg, #000 calc(100% - 20px), transparent);
-    }
-}
+/*
+ * The chips WRAP; they do not scroll. A control you have to discover by
+ * swiping is one most people never find, and the chips that were off the end
+ * sat behind All and Floor.
+ *
+ * `display: contents` on the chip container is what makes the wrap useful.
+ * Left as a box of its own it would be a column about 183 px wide on a 375 px
+ * iPhone once the tail has taken its 150, and the chips would stack three deep
+ * beside a large empty gap. Dissolved into the row they wrap across its full
+ * width, and the tail is simply the last item on the line.
+ *
+ * `margin-left: auto` then reads correctly either way round: everything fits
+ * and the tail sits right on one line; it does not and the tail drops to a
+ * line of its own, still right-aligned, leaving the chips the whole line above.
+ */
+.tb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.chips { display: contents; }
 
 .tail {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
-    padding-left: 8px; border-left: 1px solid var(--border);
+    flex: 0 0 auto; margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
 }
 
 .chip {
@@ -168,15 +167,14 @@ body.panel-collapsed #typeBar {
     .chip .short { display: none; }
 }
 
-/* Per-unit row, only there when exactly one type is lit. */
+/* Per-unit row, only there when exactly one type is lit. Wraps for the same
+   reason the chips do - four AXLE-0n units are marginal on a narrow phone. */
 .units {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     margin-top: 7px; padding-top: 7px;
     border-top: 1px solid var(--border);
-    overflow-x: auto; scrollbar-width: none;
 }
 .units[hidden] { display: none; }
-.units::-webkit-scrollbar { display: none; }
 .unit {
     appearance: none; cursor: pointer; flex: 0 0 auto;
     min-height: 32px; padding: 4px 11px;

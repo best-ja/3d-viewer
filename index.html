@@ -9,7 +9,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>BMA BWIM System</title>
-    <link rel="stylesheet" href="css/app.css">
+    <!-- ?v= is not decoration. There is no build step to hash these names, and
+         iOS Safari has no hard reload - a phone that has seen the page once
+         will happily keep serving the stylesheet it already has, which looks
+         exactly like a CSS change not working. js/sites.js is cache-busted for
+         the same reason. Bump the number whenever the CSS changes. -->
+    <link rel="stylesheet" href="css/app.css?v=2">
     <!--
       three.js is pinned to 0.163.0 on purpose. The models declare
       KHR_materials_pbrSpecularGlossiness, which no current three.js reads; they
@@ -39,9 +44,9 @@
 
     <!--
       The sensor menu is a strip rather than a sidebar: it used to cover the
-      left third of a phone screen, which is where the bridge is. The chips
-      scroll sideways when they have to; the tail never does, so All, Floor
-      and the collapse control are always under your thumb.
+      left third of a phone screen, which is where the bridge is. Every chip
+      is always visible - they wrap onto a second row rather than scrolling
+      sideways, and All, Floor and the collapse control go with them.
     -->
     <div id="typeBar" class="panel" role="group" aria-label="Sensor types">
         <div class="tb-row">

@@ -6,8 +6,13 @@
     <meta name="theme-color" content="#060912">
     <meta name="description" content="BMA BWIM System - installed equipment across all five bridges.">
     <title>BMA BWIM System</title>
-    <link rel="stylesheet" href="css/app.css">
-    <link rel="stylesheet" href="css/show.css">
+    <!-- ?v= is not decoration. There is no build step to hash these names, and
+         iOS Safari has no hard reload - a phone that has seen the page once
+         will happily keep serving the stylesheet it already has, which looks
+         exactly like a CSS change not working. js/sites.js is cache-busted for
+         the same reason. Bump the number whenever the CSS changes. -->
+    <link rel="stylesheet" href="css/app.css?v=2">
+    <link rel="stylesheet" href="css/show.css?v=2">
     <!--
       Same three.js pin as index.html, and for the same reason. The models
       declare KHR_materials_pbrSpecularGlossiness, which no current three.js
