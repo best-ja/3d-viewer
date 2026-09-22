@@ -1,0 +1,194 @@
+/* ============================================================
+   BMA BWIM System - conference-room show screen (show.html)
+
+   Loads on top of app.css, which supplies the palette, the Thai-first
+   font stack and the base body rules. Everything here is layout for a
+   large screen viewed from across a room: bigger type, no controls,
+   nothing that needs a pointer.
+
+   The panels are TRANSPARENT. They exist to give js/show.js their
+   rectangles, which it renders the 3D scenes into on the single canvas
+   underneath. Anything with a background here would hide the bridge.
+   ============================================================ */
+
+body.show {
+    /* Read from a few metres away, so everything steps up a size. */
+    --gap: 10px;
+    --strip-h: 21vh;
+    --bar-h: 58px;
+    cursor: none;                 /* unattended display - no pointer on screen */
+}
+body.show.has-pointer { cursor: default; }
+
+#stage {
+    position: fixed; inset: 0; z-index: 0; display: block;
+    width: 100vw; height: 100vh;
+    background: var(--bg);
+}
+
+/* The layout grid. pointer-events:none throughout - there is nothing to
+   click, and it keeps the cursor from ever showing a text caret. */
+#show {
+    position: fixed; inset: 0; z-index: 2;
+    display: grid;
+    grid-template-rows: var(--bar-h) 1fr var(--strip-h);
+    gap: var(--gap);
+    padding: var(--gap);
+    pointer-events: none;
+}
+
+/* ---------- top bar ---------- */
+#bar {
+    display: flex; align-items: center; gap: 18px;
+    padding: 0 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+}
+#bar .brand { font-size: 22px; letter-spacing: 0.3px; color: var(--dim); }
+#bar .brand b { color: var(--text); font-weight: 700; }
+#bar .tagline {
+    flex: 1;
+    font-size: 15px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#clock { font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ---------- panels ---------- */
+.cell {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    /* no background: the canvas behind IS the content */
+}
+#big { border-color: rgba(148, 163, 184, 0.34); }
+
+#strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--gap);
+}
+
+/* ---------- the featured bridge's nameplate ---------- */
+.plate {
+    position: absolute; left: 24px; bottom: 22px; z-index: 3;
+    max-width: 62%;
+    text-shadow: 0 2px 18px rgba(2, 4, 10, 0.95), 0 1px 3px rgba(2, 4, 10, 1);
+}
+.plate .thai {
+    font-size: clamp(30px, 4.2vw, 62px);
+    font-weight: 700; line-height: 1.25; color: var(--text);
+}
+.plate .line { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.plate .code {
+    font-size: clamp(13px, 1.1vw, 18px); letter-spacing: 2.5px;
+    color: var(--dim); text-transform: uppercase;
+}
+
+/* The sensor type currently lit, tinted to match the highlight colour.
+   --c is set from SENSOR_TYPES[i].css by js/show.js. */
+.chip {
+    --c: var(--accent);
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 13px;
+    font-size: clamp(12px, 1vw, 17px); font-weight: 600; letter-spacing: 0.6px;
+    color: var(--c);
+    border: 1px solid color-mix(in srgb, var(--c) 55%, transparent);
+    background: color-mix(in srgb, var(--c) 14%, rgba(6, 9, 18, 0.72));
+    border-radius: 999px;
+    text-shadow: none;
+}
+.chip::before {
+    content: ""; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--c); box-shadow: 0 0 10px var(--c);
+}
+
+/* Progress through the current sensor type, along the foot of the big panel. */
+#dwell {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 3;
+    height: 3px; background: rgba(148, 163, 184, 0.16);
+}
+#dwell i {
+    display: block; height: 100%; width: 0;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+}
+
+/* Dip to black on a bridge change: set to 1 with no transition, then to 0. */
+#bigFade {
+    position: absolute; inset: 0; z-index: 4;
+    background: var(--bg); opacity: 0;
+    transition: opacity var(--fade, 700ms) ease-out;
+}
+#bigFade.instant { transition: none; }
+
+/* ---------- small panel captions ---------- */
+.cell.small .cap {
+    position: absolute; left: 14px; bottom: 11px; z-index: 3;
+    text-shadow: 0 2px 14px rgba(2, 4, 10, 0.95);
+}
+.cell.small .cap .thai {
+    font-size: clamp(14px, 1.35vw, 22px); font-weight: 600; color: var(--text);
+    line-height: 1.3;
+}
+.cell.small .cap .code {
+    font-size: 11px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase;
+}
+
+/* Shown until that bridge's model has arrived, or if it failed. */
+.placeholder {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; color: var(--dim);
+    background: var(--bg);
+}
+.placeholder[hidden] { display: none; }
+.placeholder.failed { color: var(--danger); }
+
+/* ---------- boot / loading ---------- */
+#boot {
+    position: fixed; inset: 0; z-index: 70;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    transition: opacity 600ms ease;
+}
+#boot.hide { opacity: 0; pointer-events: none; }
+.boot-box { width: min(560px, 82vw); text-align: center; }
+.boot-brand { font-size: 30px; color: var(--dim); margin-bottom: 8px; }
+.boot-brand b { color: var(--text); font-weight: 700; }
+.boot-sub { font-size: 15px; color: var(--dim); margin-bottom: 20px; }
+.boot-bar {
+    height: 5px; border-radius: 3px; overflow: hidden;
+    background: rgba(148, 163, 184, 0.16);
+}
+.boot-bar i {
+    display: block; height: 100%; width: 0;
+    background: var(--accent); transition: width 240ms ease;
+}
+.boot-list {
+    list-style: none; margin: 18px 0 0; padding: 0;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px;
+    font-size: 13px; color: var(--dim);
+}
+.boot-list li.done { color: var(--text); }
+.boot-list li.failed { color: var(--danger); }
+
+/* ---------- hard failure (WebGL context lost, no bridges) ---------- */
+#fault {
+    position: fixed; inset: 0; z-index: 90;
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px; text-align: center;
+    font-size: 19px; color: var(--text); background: var(--bg);
+}
+#fault[hidden] { display: none; }
+
+/* A tall or narrow screen cannot carry a 4-wide strip legibly. */
+@media (max-aspect-ratio: 1/1) {
+    #strip { grid-template-columns: repeat(2, 1fr); }
+    body.show { --strip-h: 30vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #bigFade, .boot-bar i { transition: none; }
+}

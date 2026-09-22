@@ -16,11 +16,11 @@
  * phone and a cold one.
  */
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { HIGHLIGHT_LAYER } from './sensors.js';
+import { loadGLB } from './model.js';
 
 const easeInOut = k => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 
@@ -134,35 +134,20 @@ export function createViewer({ canvas, labelsEl }) {
         invalidate();
     }
 
-    function loadModel(url, onProgress) {
+    async function loadModel(url, onProgress) {
         clearModel();
-        return new Promise((resolve, reject) => {
-            new GLTFLoader().load(url, gltf => {
-                const root = gltf.scene;
-                root.updateMatrixWorld(true);
-                scene.add(root);
+        const info = await loadGLB(url, onProgress);
+        scene.add(info.root);
 
-                const bbox = new THREE.Box3().setFromObject(root);
-                const center = bbox.getCenter(new THREE.Vector3());
-                const size = bbox.getSize(new THREE.Vector3());
+        camera.near = Math.max(0.1, info.span / 4000);
+        camera.far = info.span * 12;
+        camera.updateProjectionMatrix();
+        controls.maxDistance = info.span * 4;
+        controls.target.copy(info.center);
 
-                // Bridges run along X on some sites (BRC) and Z on the others.
-                // Every framing decision keys off this rather than assuming.
-                const majorAxis = size.x >= size.z ? 'x' : 'z';
-                const minorAxis = majorAxis === 'x' ? 'z' : 'x';
-                const span = Math.max(size.x, size.z);
-
-                camera.near = Math.max(0.1, span / 4000);
-                camera.far = span * 12;
-                camera.updateProjectionMatrix();
-                controls.maxDistance = span * 4;
-                controls.target.copy(center);
-
-                model = { root, bbox, center, size, span, majorAxis, minorAxis };
-                invalidate();
-                resolve(model);
-            }, onProgress, reject);
-        });
+        model = info;
+        invalidate();
+        return model;
     }
 
     /* ---------------- framing ---------------- */

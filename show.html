@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#060912">
+    <meta name="description" content="BMA BWIM System - installed equipment across all five bridges.">
+    <title>BMA BWIM System</title>
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/show.css">
+    <!--
+      Same three.js pin as index.html, and for the same reason. The models
+      declare KHR_materials_pbrSpecularGlossiness, which no current three.js
+      reads; they fall back to the pbrMetallicRoughness block every material
+      also carries. Bumping the version changes nothing here, so don't.
+    -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body class="show">
+    <!--
+      One canvas behind everything. The panels below are transparent boxes that
+      exist only to give the renderer their rectangles; each is drawn into with
+      setViewport/setScissor. All text lives in the DOM, never in the 3D scene,
+      so Thai renders properly and stays crisp at any screen size.
+    -->
+    <canvas id="stage"></canvas>
+
+    <div id="show">
+        <header id="bar">
+            <span class="brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</span>
+            <span class="tagline">Weigh-in-motion equipment installation</span>
+            <span id="clock" aria-hidden="true"></span>
+        </header>
+
+        <section id="big" class="cell">
+            <div id="bigFade" aria-hidden="true"></div>
+            <div class="plate">
+                <div class="thai wrap-any" id="bigName"></div>
+                <div class="line">
+                    <span class="code" id="bigCode"></span>
+                    <span class="chip" id="bigChip"></span>
+                </div>
+            </div>
+            <div id="dwell" aria-hidden="true"><i></i></div>
+            <div class="placeholder" id="bigWait">Loading&#8230;</div>
+        </section>
+
+        <section id="strip"><!-- four .cell.small, built by js/show.js --></section>
+    </div>
+
+    <div id="boot">
+        <div class="boot-box">
+            <div class="boot-brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</div>
+            <div class="boot-sub" id="bootSub">Preparing the display&#8230;</div>
+            <div class="boot-bar"><i id="bootFill"></i></div>
+            <ul class="boot-list" id="bootList"></ul>
+        </div>
+    </div>
+
+    <div id="fault" hidden></div>
+
+    <noscript>
+        <p style="padding:24px;color:#f1f5f9;font-family:sans-serif">
+            This display needs JavaScript and WebGL.
+        </p>
+    </noscript>
+
+    <script type="module" src="js/show.js"></script>
+</body>
+</html>

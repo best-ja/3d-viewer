@@ -7,6 +7,9 @@ Expand a type to fly to one individual unit, and collapse the panel to get the w
 
 It shows where equipment is. It records nothing and reports no readings.
 
+There is a second page, **[`show.html`](show.html)** — an unattended display for the conference
+room. See [The show screen](#the-show-screen).
+
 ## Run it locally
 
 Any static server works; the GLBs are fetched with `fetch`, so opening `index.html` from the
@@ -269,12 +272,16 @@ accurate in portrait.
 ## Layout
 
 ```
-index.html          markup and the three.js import map
-css/app.css         mobile-first styling
-js/sites.js         the 5 bridges - edit names and north offsets here
-js/main.js          boot and wiring
+index.html          the inspector page - markup and the three.js import map
+show.html           the conference-room display
+css/app.css         mobile-first styling, and the palette both pages use
+css/show.css        big-screen layout for show.html
+js/sites.js         the 5 bridges - edit names, views and north offsets here
+js/main.js          boot and wiring for index.html
+js/show.js          boot, panels, render loop and cycle for show.html
+js/model.js         loading a GLB and measuring it - shared by both pages
 js/viewer.js        renderer, camera, orbit, fly-to, framing, highlight overlay pass
-js/sensors.js       equipment detection and highlighting
+js/sensors.js       equipment detection and highlighting - shared by both pages
 js/compass.js       device orientation to camera heading, calibration
 js/ui.js            side panel, bridge picker, loader, toast
 Model-glb/*.glb     the bridge models
@@ -289,6 +296,42 @@ Rendering is on demand — the loop only draws when something moved. These model
 calls per frame, so that matters for phone battery. If a target phone still struggles, the next
 lever is a build-time `gltf-transform optimize` pass to produce smaller models.
 
+## The show screen
+
+`show.html` is for the screen in the conference room. Open it, walk away, and it runs on its own:
+one big panel featuring a bridge with its name over it, four small panels showing the ones coming
+up. Every seven seconds the highlight steps to the next sensor type; after all three the feature
+moves to the next bridge. A full pass is about a minute and three quarters.
+
+It cycles **AXLE DETECTOR, WEIGHT SENSOR and CAS / BTS**. Cameras are left out on purpose.
+
+Everything worth changing is the `SHOW` block at the top of `js/show.js` — how long each type
+holds, how fast the orbit turns, how high the camera rides for each type, and how much bridge stays
+in frame around the equipment.
+
+It needs no input, but for a presenter: **space** pauses, **left/right** step between bridges, and
+**f** goes fullscreen. `?dwell=12000` overrides the pacing without editing anything.
+
+### How it draws five bridges at once
+
+There is one `<canvas>` and one WebGL context. The five panels are transparent boxes in a CSS grid
+whose rectangles are read back with `getBoundingClientRect()`, and each is drawn into with
+`setViewport`/`setScissor`. Five separate canvases would mean five contexts, five environment maps
+and five render loops, with no way to spend the frame budget where it matters.
+
+All five models stay resident — about 8 400 draw calls and 350 MB of GPU memory between them — so
+the budget is spent deliberately: the big panel is redrawn every frame, the small ones take turns,
+one per frame. That works because the renderer asks for `preserveDrawingBuffer`, so a panel that is
+skipped keeps the pixels it had instead of flickering to black. A frame comes to roughly 2 500–3 400
+draw calls, under twice what the inspector page already does on a phone.
+
+If the machine driving the TV cannot keep up, the page notices and hands work back by itself —
+first by refreshing the small panels less often, then by dropping resolution. It says so in the
+console. `?quality=0` pins it at full quality.
+
+The camera never has to see past anything, because the highlight pass clears the depth buffer: the
+weight sensors and cabinets under the deck glow straight through it.
+
 ## Links and debugging
 
 `?site=BKT` opens a bridge, `?site=BKT&type=weight` opens it with that type highlighted, and
@@ -296,4 +339,5 @@ lever is a build-time `gltf-transform optimize` pass to produce smaller models.
 sent to someone else.
 
 `?debug=1` exposes `window.__bwim` with the viewer, the current site and the detected groups —
-useful for checking detection from the console on a real model.
+useful for checking detection from the console on a real model. On `show.html` the same flag
+exposes `window.__show` with the renderer, the five bridges, the panels and the cycle state.
