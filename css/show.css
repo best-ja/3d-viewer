@@ -3,8 +3,8 @@
 
    Loads on top of app.css, which supplies the palette, the Thai-first
    font stack and the base body rules. Everything here is layout for a
-   large screen viewed from across a room: bigger type, no controls,
-   nothing that needs a pointer.
+   large screen viewed from across a room: bigger type, no controls, and
+   no cursor until somebody actually moves one.
 
    The panels are TRANSPARENT. They exist to give js/show.js their
    rectangles, which it renders the 3D scenes into on the single canvas
@@ -26,8 +26,8 @@ body.show.has-pointer { cursor: default; }
     background: var(--bg);
 }
 
-/* The layout grid. pointer-events:none throughout - there is nothing to
-   click, and it keeps the cursor from ever showing a text caret. */
+/* The layout grid. pointer-events:none on the grid itself, so the gaps and
+   the top bar stay inert; only the panels take input. */
 #show {
     position: fixed; inset: 0; z-index: 2;
     display: grid;
@@ -54,6 +54,16 @@ body.show.has-pointer { cursor: default; }
 }
 #clock { font-size: 20px; color: var(--text); font-variant-numeric: tabular-nums; }
 
+/* Shown only while the cycle is standing still, so the room can see that it
+   was somebody's doing and not a hung display. */
+#held {
+    padding: 3px 11px;
+    font-size: 13px; letter-spacing: 1.6px; text-transform: uppercase;
+    color: var(--dim);
+    border: 1px solid var(--border); border-radius: 999px;
+}
+#held[hidden] { display: none; }
+
 /* ---------- panels ---------- */
 .cell {
     position: relative;
@@ -61,8 +71,18 @@ body.show.has-pointer { cursor: default; }
     border-radius: 14px;
     overflow: hidden;
     /* no background: the canvas behind IS the content */
+
+    /* The one part of the page that takes input: drag to turn the bridge, tap
+       a small one to bring it up. touch-action:none or a drag scrolls the page
+       out from under the gesture on a touchscreen. */
+    pointer-events: auto;
+    touch-action: none;
 }
 #big { border-color: rgba(148, 163, 184, 0.34); }
+
+/* Only once a pointer has actually appeared - an unattended display shows none. */
+body.show.has-pointer .cell { cursor: grab; }
+body.show.has-pointer.dragging .cell { cursor: grabbing; }
 
 #strip {
     display: grid;
@@ -87,8 +107,8 @@ body.show.has-pointer { cursor: default; }
 }
 
 /* Every sensor type is lit at once, so the legend is what tells a visitor
-   which colour is which. One chip per type; --c is set from
-   SENSOR_TYPES[i].css by js/show.js. */
+   which colour is which - and that is all it is, hence no counts. One chip
+   per type; --c is set from SENSOR_TYPES[i].css by js/show.js. */
 .legend { display: inline-flex; flex-wrap: wrap; gap: 8px; }
 .chip {
     --c: var(--accent);
@@ -105,18 +125,21 @@ body.show.has-pointer { cursor: default; }
     content: ""; width: 9px; height: 9px; border-radius: 50%;
     background: var(--c); box-shadow: 0 0 10px var(--c);
 }
-.chip .n {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.75; margin-left: 2px;
+/* The outgoing bridge, dissolving. js/show.js copies the panel's pixels in,
+   sets this opaque with no transition, then releases it to ease to nothing.
+   Below the nameplate (z-index 3) so the captions dissolve on their own. */
+.freeze {
+    position: absolute; inset: 0; z-index: 1;
+    width: 100%; height: 100%;
+    opacity: 0; pointer-events: none;
+    transition: opacity var(--fade, 900ms) ease-out;
 }
+.freeze.instant { transition: none; }
 
-/* Dip to black on a bridge change: set to 1 with no transition, then to 0. */
-#bigFade {
-    position: absolute; inset: 0; z-index: 4;
-    background: var(--bg); opacity: 0;
-    transition: opacity var(--fade, 700ms) ease-out;
+/* Captions cross-fade with the picture instead of snapping to the new name. */
+#bigName, #bigCode, .cell.small .cap .thai, .cell.small .cap .code {
+    transition: opacity calc(var(--fade, 900ms) * 0.3) ease-out;
 }
-#bigFade.instant { transition: none; }
 
 /* ---------- small panel captions ---------- */
 .cell.small .cap {
@@ -157,5 +180,8 @@ body.show.has-pointer { cursor: default; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    #bigFade { transition: none; }
+    .freeze,
+    #bigName, #bigCode, .cell.small .cap .thai, .cell.small .cap .code {
+        transition: none;
+    }
 }

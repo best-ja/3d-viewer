@@ -29,18 +29,21 @@
       exist only to give the renderer their rectangles; each is drawn into with
       setViewport/setScissor. All text lives in the DOM, never in the 3D scene,
       so Thai renders properly and stays crisp at any screen size.
+
+      Each cell also carries a canvas.freeze, added by js/show.js: the outgoing
+      bridge is copied into it and dissolved away when the feature changes.
     -->
     <canvas id="stage"></canvas>
 
     <div id="show">
         <header id="bar">
             <span class="brand">BMA&nbsp;<b>BWIM</b>&nbsp;System</span>
-            <span class="tagline">Weigh-in-motion equipment installation</span>
+            <span class="tagline">TERA BWIM installation</span>
+            <span id="held" hidden></span>
             <span id="clock" aria-hidden="true"></span>
         </header>
 
         <section id="big" class="cell">
-            <div id="bigFade" aria-hidden="true"></div>
             <div class="plate">
                 <div class="thai wrap-any" id="bigName"></div>
                 <div class="line">

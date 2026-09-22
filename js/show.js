@@ -2,7 +2,8 @@
  * Conference-room show screen.
  *
  * One big panel featuring a bridge at a time, four small panels showing the
- * ones coming up. It runs itself: nobody touches this machine.
+ * ones coming up. It runs itself, and anyone who walks up to it can take over:
+ * tap a small panel to bring that bridge up, drag to turn it.
  *
  * WHY ONE CANVAS
  * Five bridges are live at once. Five <canvas> elements would mean five WebGL
@@ -18,7 +19,8 @@
  * small ones take turns, one per frame. A skipped panel keeps the pixels it
  * had, which is the whole reason the renderer asks for preserveDrawingBuffer -
  * without it WebGL may throw the drawing buffer away after compositing and the
- * waiting panels would flicker to black.
+ * waiting panels would flicker to black. The same flag is what lets a bridge
+ * change be cross-dissolved: the outgoing pixels can still be read back out.
  *
  * WHY ONE SHOT PER BRIDGE SERVES EVERY SENSOR TYPE
  * Everything is lit at once, each type in its own colour, and the highlight
@@ -31,7 +33,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadGLB } from './model.js';
 import {
     detectSensors, createHighlighter, SENSOR_TYPES, HIGHLIGHT_LAYER,
-    AXLE, WEIGHT, CABINET,
+    AXLE, CAMERA, WEIGHT, CABINET,
 } from './sensors.js';
 
 // Same cache-busting import as index.html uses: js/sites.js is the file that
@@ -39,38 +41,48 @@ import {
 const { SITES } = await import(`./sites.js?t=${Date.now()}`);
 
 const params = new URLSearchParams(location.search);
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ------------------------------------------------------------------ *
  * Everything worth tuning for the room                                *
  * ------------------------------------------------------------------ */
 const SHOW = {
-    /** Lit together on every bridge, each in its own colour. No cameras. */
-    TYPES:     [AXLE, WEIGHT, CABINET],
+    /** Lit together on every bridge, each in its own colour, and framed
+     *  together - so everything that glows is somewhere in shot. */
+    TYPES:     [AXLE, CAMERA, WEIGHT, CABINET],
     /** How long each bridge holds the big panel. Five of these is one pass. */
     DWELL_MS:  Number(params.get('dwell')) || 14000,
-    /** Dip-to-black when the featured bridge changes. */
-    FADE_MS:   700,
+    /** Cross-dissolve when the featured bridge changes. */
+    FADE_MS:   900,
     /**
      * Orbit speed for the featured bridge, degrees per second. A turn lasts
      * DWELL_MS, so this also decides how far from broadside the shot ever
-     * gets: at 3 deg/s a 14 s turn sweeps 42 deg, which is broadside give or
-     * take half of that. Faster than about 4 and the bridge swings round to
-     * end-on, where a deck is just a receding sliver.
+     * gets - and, because the distance is fixed, how far back it has to stand
+     * to hold the whole sweep. That second part is expensive: on SSW the fit at
+     * 30 deg off broadside is 59% further out than at broadside, so a wide
+     * sweep buys movement by shrinking the bridge for the entire show. At
+     * 1.5 deg/s a 14 s turn sweeps 21 deg, which costs about 14%.
      */
-    ORBIT_DPS: 3,
+    ORBIT_DPS: 1.5,
     /**
      * And for the four waiting in the strip. Slower on purpose: those panels
      * are redrawn in rotation, a few times a second, so a gentle turn keeps
      * the step between redraws too small to read as juddering.
      */
-    IDLE_DPS:  1.2,
+    IDLE_DPS:  0.8,
     /**
-     * The one shot per bridge - the union of the three lit groups, padded.
-     * `elevation` is degrees above the deck, `minSpan` the least metres of
-     * bridge kept in frame so a tight group cannot pull the camera into the
-     * girder.
+     * Degrees above the deck. Kept low: with the roadside cameras in the shot
+     * the lit box is around 8 m tall, which makes the VERTICAL fit the binding
+     * one on most bridges - and the across-deck half-width enters that fit as
+     * `half * sin(elevation)`, so every degree of tilt costs reach.
      */
-    FRAME:     { elevation: 20, minSpan: 30 },
+    FRAME:     { elevation: 12 },
+    /** Breathing room around the lit equipment, as a multiple of the tight fit. */
+    FIT_PAD:   1.12,
+    /** Degrees of turn per pixel dragged. */
+    DRAG_DPP:  0.3,
+    /** After anyone touches it, how long before the cycle picks up again. */
+    HOLD_MS:   60000,
     /**
      * What the governor aims for. The per-level cap may be higher; this is the
      * line below which frames are judged too slow, and it stays fixed so the
@@ -84,7 +96,7 @@ const $ = id => document.getElementById(id);
 const dom = {
     canvas: $('stage'), big: $('big'), strip: $('strip'),
     bigName: $('bigName'), bigCode: $('bigCode'), bigLegend: $('bigLegend'),
-    bigWait: $('bigWait'), bigFade: $('bigFade'),
+    bigWait: $('bigWait'), held: $('held'),
     clock: $('clock'), fault: $('fault'),
 };
 document.documentElement.style.setProperty('--fade', `${SHOW.FADE_MS}ms`);
@@ -109,7 +121,8 @@ const renderer = new THREE.WebGLRenderer({
     canvas: dom.canvas,
     antialias: true,
     powerPreference: 'high-performance',
-    // Required: panels that are not redrawn this frame must keep their pixels.
+    // Required twice over: panels that are not redrawn this frame must keep
+    // their pixels, and a bridge change reads the outgoing pixels back out.
     preserveDrawingBuffer: true,
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
@@ -147,19 +160,28 @@ const UP = new THREE.Vector3(0, 1, 0);
 const _dir = new THREE.Vector3(), _right = new THREE.Vector3(), _up = new THREE.Vector3();
 const _corner = new THREE.Vector3();
 
+/** Unit vector from the target towards a camera at this azimuth and elevation. */
+function orbitDir(azDeg, elDeg) {
+    const az = THREE.MathUtils.degToRad(azDeg);
+    const el = THREE.MathUtils.degToRad(elDeg);
+    return _dir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
+}
+
 /**
- * Put `cam` on the orbit at `azDeg` and back it off far enough that the whole
- * bridge fits.
+ * How far back the camera has to stand at this angle for the whole box to fit.
  *
  * The bridges are long and thin, so a bounding sphere would leave them tiny
  * end-on and overflowing side-on. Measuring the eight box corners along the
  * camera's own axes instead keeps the bridge filling the panel all the way
  * round the orbit.
+ *
+ * `deepest` comes back separately because it is the term that swings hardest
+ * with azimuth - it is the box's reach towards the camera, so it grows as the
+ * long axis turns into the view direction. Adding it to a fit recomputed every
+ * frame is what used to make the shot creep in and out.
  */
-function aim(cam, box, centre, azDeg, elDeg) {
-    const az = THREE.MathUtils.degToRad(azDeg);
-    const el = THREE.MathUtils.degToRad(elDeg);
-    _dir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
+function fitDistance(box, centre, fov, aspect, azDeg, elDeg) {
+    orbitDir(azDeg, elDeg);
     _right.crossVectors(UP, _dir).normalize();
     _up.crossVectors(_dir, _right).normalize();
 
@@ -172,52 +194,115 @@ function aim(cam, box, centre, azDeg, elDeg) {
         needU = Math.max(needU, Math.abs(_corner.dot(_up)));
         deepest = Math.max(deepest, _corner.dot(_dir));
     }
-    const vHalf = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
-    const hHalf = vHalf * cam.aspect;
+    const vHalf = Math.tan(THREE.MathUtils.degToRad(fov) / 2);
+    const hHalf = vHalf * aspect;
+    return { fit: Math.max(needU / vHalf, needR / hHalf) * SHOW.FIT_PAD + deepest, deepest };
+}
 
-    cam.position.copy(centre).addScaledVector(_dir, Math.max(needU / vHalf, needR / hHalf) * 1.06 + deepest);
+/** Put `cam` on the orbit at a distance somebody else decided. */
+function aim(cam, centre, azDeg, elDeg, radius) {
+    cam.position.copy(centre).addScaledVector(orbitDir(azDeg, elDeg), radius);
     cam.lookAt(centre);
 }
 
+/** Signed degrees from `a` round to `b`, in -180..180. */
+const offsetDeg = (a, b) => ((a - b + 540) % 360) - 180;
+
+/** Half the arc the orbit sweeps while a bridge is featured, plus a margin.
+ *  Capped, because ?dwell= can make the sweep arbitrarily long. */
+const fitArc = () => Math.min(turnSweep() / 2 + 2, 25);
+
 /**
- * The one shot for a bridge - everything that gets lit, framed together.
+ * The fixed distance for this bridge in a panel of this shape.
  *
- * NOT the whole bridge. These decks are 80-130 m long and the equipment sits
- * in a 10-15 m weigh station on one of them; fitting the full model puts the
- * camera 110 m back, where the sensors are a few pixels and the point of the
- * screen is lost. This takes the union of the lit groups, pads it out until
- * there is recognisable bridge on either side, and clips it back inside the
- * model so the shot never floats off the end.
+ * Worked out once and cached, which is the whole point: recomputing the fit
+ * every frame is what made the shot zoom in and out as it turned. The cache key
+ * carries the field of view and the aspect, so it invalidates itself when a
+ * panel changes shape and nothing has to remember to clear it.
  *
- * The cameras are deliberately left out of the union as well as out of the
- * highlight: they are mounted further apart than anything else on the bridge,
- * and including them stretches the shot wide enough to shrink everything else
- * back out of sight.
+ * Fitted over the arc the show actually sweeps and NOT over the full circle.
+ * The two are far apart: the equipment runs three to four times longer than it
+ * is deep, so the end-on fit sits 45-60% further out than the broadside one,
+ * and fitting the circle would hold every bridge at its worst angle for the
+ * whole show. Turned past the arc by hand it grows past the edges of the panel,
+ * which is exactly what a fixed distance should do.
  */
-function frameFor(model, groups) {
+function radiusFor(b, cam) {
+    const key = `${cam.fov}@${cam.aspect.toFixed(3)}`;
+    const cached = b.fit.get(key);
+    if (cached !== undefined) return cached;
+
+    const arc = fitArc();
+    let sweep = 0, worstDeep = 0;
+    for (let a = 0; a < 360; a += 3) {
+        const m = fitDistance(b.frame, b.centre, cam.fov, cam.aspect, a, SHOW.FRAME.elevation);
+        worstDeep = Math.max(worstDeep, m.deepest);
+        if (Math.abs(offsetDeg(a, b.broadside)) <= arc) sweep = Math.max(sweep, m.fit);
+    }
+    // One guarantee that has to hold outside the arc too: turned by hand to any
+    // angle at all, the camera still ends up outside the box rather than
+    // somewhere inside the bridge.
+    const r = Math.max(sweep, worstDeep * 1.05 + 1);
+    b.fit.set(key, r);
+    return r;
+}
+
+/**
+ * Which side to stand on - found, not assumed.
+ *
+ * Across the deck is the obvious answer and the right one four times out of
+ * five. It is wrong on PM1-BWK, where the equipment spans 25 m ACROSS a 35 m
+ * wide bridge and only 17 m along it: standing across the deck there turns the
+ * long dimension into depth and pushes the camera 35 m back, where looking
+ * along the deck needs 28. So sweep the circle, take the cheapest angle, and
+ * prefer the deck broadside among everything within 5% of it - the search then
+ * only overrules the classic shot where the equipment really is laid out the
+ * other way round.
+ */
+function chooseBroadside(box, centre, fov, aspect, deckAz) {
+    const fits = [];
+    let cheapest = Infinity;
+    for (let a = 0; a < 360; a += 3) {
+        const { fit } = fitDistance(box, centre, fov, aspect, a, SHOW.FRAME.elevation);
+        fits.push([a, fit]);
+        cheapest = Math.min(cheapest, fit);
+    }
+    let pick = deckAz, closest = Infinity;
+    for (const [a, fit] of fits) {
+        if (fit > cheapest * 1.05) continue;
+        const off = Math.abs(offsetDeg(a, deckAz));
+        if (off < closest) { closest = off; pick = a; }
+    }
+    return pick;
+}
+
+/**
+ * What the shot is of: everything that gets lit, and nothing else.
+ *
+ * NOT the whole bridge. These decks are 80-130 m long and the equipment sits in
+ * a weigh station on one of them; fitting the full model puts the camera 110 m
+ * back, where the sensors are a few pixels and the point of the screen is lost.
+ * With the roadside cameras in it this box runs 17-41 m - they are mounted
+ * 23-41 m apart on four of the five bridges - against 7-21 m for the weigh
+ * station on its own.
+ *
+ * Deliberately unpadded. The slack that keeps bridge in shot around the
+ * equipment is slack the fit already carries for the orbit sweep: the camera
+ * stands back far enough for the angle at the end of the sweep, so at broadside
+ * there is room to spare on every side. Padding the box as well would pay for
+ * the same margin twice.
+ */
+function litBox(model, groups) {
     const box = new THREE.Box3();
     for (const k of SHOW.TYPES) {
         const g = groups[k];
         if (g && g.focus && !g.focus.isEmpty()) box.union(g.focus);
     }
-    if (box.isEmpty()) return model.bbox.clone();
-
-    // Pad ALONG the deck, barely across it. A bridge is 9-20 m wide and 80 m
-    // long; padding both axes equally frames 30 m of thin air to either side
-    // and shrinks the equipment back into the middle of an empty panel.
-    const size = box.getSize(new THREE.Vector3());
-    const along = size[model.majorAxis];
-    const pad = new THREE.Vector3();
-    pad[model.majorAxis] = Math.max(along * 0.55, (SHOW.FRAME.minSpan - along) / 2, 3);
-    pad[model.minorAxis] = Math.max(size[model.minorAxis] * 0.3, 1.5);
-    pad.y = Math.max(size.y * 0.5, 2.5);
-
-    box.expandByVector(pad);
-    return box.intersect(model.bbox);
+    return box.isEmpty() ? model.bbox.clone() : box;
 }
 
-/** Broadside: the camera sits across the deck, never looking down its length. */
-const broadsideOf = model => (model.majorAxis === 'z' ? 90 : 0);
+/** Square across the deck: the shot to prefer when nothing argues against it. */
+const deckBroadside = model => (model.majorAxis === 'z' ? 90 : 0);
 
 /** How far the orbit travels while a bridge holds the big panel. */
 const turnSweep = () => SHOW.ORBIT_DPS * SHOW.DWELL_MS / 1000;
@@ -226,15 +311,17 @@ const turnSweep = () => SHOW.ORBIT_DPS * SHOW.DWELL_MS / 1000;
  * Bridges                                                             *
  * ------------------------------------------------------------------ */
 /** One per site. `azimuth` lives here, not on the panel, so a bridge keeps
- *  turning at the same rate whichever panel it is currently shown in. */
+ *  turning at the same rate whichever panel it is currently shown in - and
+ *  arrives on the big panel still facing where someone turned it. */
 const bridges = SITES.map((site, i) => ({
     site, ready: false, failed: false,
     model: null, scene: null, groups: null, highlighter: null,
-    azimuth: 0,                         // set from broadsideOf() once loaded
+    azimuth: 0,                         // set from chooseBroadside() once loaded
     broadside: 0,
-    // Framed once at load: everything is lit at once, so the shot never
-    // changes while a bridge is on screen.
-    frame: null, centre: new THREE.Vector3(),
+    // Worked out once at load: everything is lit at once, so the shot never
+    // changes while a bridge is on screen. `frame` is the lit equipment,
+    // `fit` caches the fixed camera distance, one entry per panel shape.
+    frame: null, centre: new THREE.Vector3(), fit: new Map(),
 }));
 
 function buildScene(model) {
@@ -260,13 +347,21 @@ function buildScene(model) {
  * ------------------------------------------------------------------ */
 /** @type {{el:HTMLElement, big:boolean, camera:THREE.PerspectiveCamera,
  *          rect:{x,y,w,h}, bridge:number, wait:HTMLElement, name:HTMLElement,
- *          code:HTMLElement}[]} */
+ *          code:HTMLElement, freeze:HTMLCanvasElement, drawn:number}[]} */
 const panels = [];
+
+/** The snapshot an outgoing bridge dissolves from. One per cell. */
+function addFreeze(cell) {
+    const c = el('canvas', { class: 'freeze', 'aria-hidden': 'true' });
+    c.style.opacity = '0';
+    cell.appendChild(c);
+    return c;
+}
 
 function buildPanels() {
     panels.push({
         el: dom.big, big: true, wait: dom.bigWait,
-        name: dom.bigName, code: dom.bigCode,
+        name: dom.bigName, code: dom.bigCode, freeze: addFreeze(dom.big),
         camera: new THREE.PerspectiveCamera(38, 16 / 9, 0.1, 10000),
         rect: null, bridge: 0, drawn: 0,
     });
@@ -280,7 +375,7 @@ function buildPanels() {
                         [wait, el('div', { class: 'cap' }, [name, code])]);
         cells.push(cell);
         panels.push({
-            el: cell, big: false, wait, name, code,
+            el: cell, big: false, wait, name, code, freeze: addFreeze(cell),
             camera: new THREE.PerspectiveCamera(42, 16 / 9, 0.1, 10000),
             rect: null, bridge: (i + 1) % bridges.length, drawn: 0,
         });
@@ -319,24 +414,22 @@ function drawPanel(p) {
     cam.near = Math.max(0.1, b.model.span / 4000);
     cam.far = b.model.span * 12;
     cam.updateProjectionMatrix();
-    aim(cam, b.frame, b.centre, b.azimuth, SHOW.FRAME.elevation);
+    aim(cam, b.centre, b.azimuth, SHOW.FRAME.elevation, radiusFor(b, cam));
 
+    // Two passes, so the lit equipment reads through the structure. The second
+    // is cheap wherever it is used - the camera is restricted to the highlight
+    // layer, so it draws the few hundred lit meshes and not the bridge's
+    // 1 200-2 100 - which is why the small panels get it too. Without it their
+    // sensors sit behind the deck and may as well not be lit at all.
     renderer.clear();
-    if (p.big) {
-        // Two passes, so the lit equipment reads through the structure.
-        cam.layers.set(0);
-        renderer.render(b.scene, cam);
-        renderer.render(dimScene, dimCamera);
-        renderer.clearDepth();
-        cam.layers.set(HIGHLIGHT_LAYER);
-        renderer.render(b.scene, cam);
-        cam.layers.set(0);
-    } else {
-        // One pass. The highlight still shows in its real position, just
-        // without the glow-through - half the cost, and these are thumbnails.
-        cam.layers.enableAll();
-        renderer.render(b.scene, cam);
-    }
+    cam.layers.set(0);
+    renderer.render(b.scene, cam);
+    renderer.render(dimScene, dimCamera);
+    renderer.clearDepth();
+    cam.layers.set(HIGHLIGHT_LAYER);
+    renderer.render(b.scene, cam);
+    cam.layers.set(0);
+
     p.drawn += 1;
     return true;
 }
@@ -344,7 +437,10 @@ function drawPanel(p) {
 /* ------------------------------------------------------------------ *
  * The cycle                                                           *
  * ------------------------------------------------------------------ */
-const cycle = { featured: 0, since: 0, paused: false };
+const cycle = { featured: 0, since: 0, paused: false, hold: 0 };
+/** Set when a bridge change needs every panel redrawn on the next frame, so
+ *  the new content is in place before the dissolve uncovers it. */
+let redrawAll = false;
 
 /** Skip past any bridge whose model never arrived. */
 function nextLive(from, step = 1) {
@@ -355,59 +451,97 @@ function nextLive(from, step = 1) {
     return from;
 }
 
-/** One chip per sensor type, in its own colour, with how many there are. */
-function drawLegend(b) {
+/** One chip per sensor type, in its own colour. Built once: every bridge
+ *  carries all four types, so this is a key to the colours and nothing more. */
+function buildLegend() {
     dom.bigLegend.replaceChildren(...SHOW.TYPES.map(key => {
         const t = typeDef(key);
-        const chip = el('span', { class: 'chip' }, [
-            el('span', { text: t.label }),
-            el('span', { class: 'n', text: String(b.groups[key].count) }),
-        ]);
+        const chip = el('span', { class: 'chip', text: t.label });
         chip.style.setProperty('--c', t.css);
         return chip;
     }));
 }
 
-function apply({ fade = false } = {}) {
+/**
+ * Freeze the panels that are about to change bridge.
+ *
+ * Reading the pixels back out is only possible because the renderer was asked
+ * for preserveDrawingBuffer. Note the source rectangle is the plain DOM one,
+ * top-left origin - not the Y-flipped rectangle measure() keeps for GL.
+ */
+function snapshot(changing) {
+    if (REDUCED) return;
+    const ratio = renderer.getPixelRatio();
+    for (const p of changing) {
+        const r = p.el.getBoundingClientRect();
+        const w = Math.round(r.width * ratio), h = Math.round(r.height * ratio);
+        if (w < 2 || h < 2) continue;
+        const c = p.freeze;
+        if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+        try {
+            c.getContext('2d').drawImage(dom.canvas,
+                Math.round(r.left * ratio), Math.round(r.top * ratio), w, h, 0, 0, w, h);
+        } catch { continue; }            // context lost mid-change - just cut
+        // Opaque with no transition, committed, then released to ease away.
+        c.classList.add('instant');
+        c.style.opacity = '1';
+        void c.offsetWidth;
+        c.classList.remove('instant');
+        c.style.opacity = '0';
+    }
+}
+
+/** Swap a caption under cover of the dissolve rather than letting it pop. */
+function swapText(node, text, fade) {
+    if (node.textContent === text) return;
+    clearTimeout(node._swap);
+    if (!fade || REDUCED) { node.textContent = text; node.style.opacity = '1'; return; }
+    node.style.opacity = '0';
+    node._swap = setTimeout(() => {
+        node.textContent = text;
+        node.style.opacity = '1';
+    }, SHOW.FADE_MS * 0.35);
+}
+
+/**
+ * Put the featured bridge on the big panel and the rest in the strip.
+ *
+ * `fade`      cross-dissolve every panel whose bridge changes.
+ * `keepAngle` leave the incoming bridge turned where it is. The cycle restarts
+ *             the sweep so a bridge always passes through broadside halfway
+ *             through its turn; a promotion by hand keeps the angle the person
+ *             just dragged it to.
+ */
+function apply({ fade = false, keepAngle = false } = {}) {
     const featured = bridges[cycle.featured];
 
-    // Restart the featured bridge's sweep so it passes through broadside
-    // halfway through its turn - the dip to black hides the jump.
-    if (fade && featured.ready) featured.azimuth = featured.broadside - turnSweep() / 2;
+    const want = panels.map((p, i) =>
+        i === 0 ? cycle.featured : (cycle.featured + i) % bridges.length);
+    const changing = panels.filter((p, i) => p.bridge !== want[i]);
+    if (fade && changing.length) snapshot(changing);
 
-    panels[0].bridge = cycle.featured;
-    for (let i = 0; i < SHOW.SLOTS; i++) {
-        panels[i + 1].bridge = (cycle.featured + 1 + i) % bridges.length;
-    }
+    if (!keepAngle && featured.ready) featured.azimuth = featured.broadside - turnSweep() / 2;
+    panels.forEach((p, i) => { p.bridge = want[i]; });
 
-    dom.bigName.textContent = featured.site.name;
-    dom.bigCode.textContent = featured.site.code;
-    if (featured.ready) drawLegend(featured);
-    else dom.bigLegend.replaceChildren();
+    swapText(dom.bigName, featured.site.name, fade);
+    swapText(dom.bigCode, featured.site.code, fade);
 
     for (const p of panels) {
         const b = bridges[p.bridge];
         if (!p.big) {
-            p.name.textContent = b.site.name;
-            p.code.textContent = b.site.code;
+            swapText(p.name, b.site.name, fade);
+            swapText(p.code, b.site.code, fade);
         }
         p.wait.hidden = b.ready;
         p.wait.classList.toggle('failed', b.failed);
         if (b.failed) p.wait.textContent = `${b.site.code} unavailable`;
     }
 
-    if (fade) {
-        // Straight to black with no transition, then let it ease back out.
-        dom.bigFade.classList.add('instant');
-        dom.bigFade.style.opacity = '1';
-        void dom.bigFade.offsetWidth;               // commit before easing
-        dom.bigFade.classList.remove('instant');
-        dom.bigFade.style.opacity = '0';
-    }
+    if (changing.length) redrawAll = true;
 }
 
 function advance(now) {
-    if (cycle.paused || now - cycle.since < SHOW.DWELL_MS) return;
+    if (cycle.paused || now < cycle.hold || now - cycle.since < SHOW.DWELL_MS) return;
     cycle.since = now;
     cycle.featured = nextLive(cycle.featured);
     apply({ fade: true });
@@ -417,6 +551,14 @@ function step(dir) {
     cycle.since = performance.now();
     cycle.featured = nextLive(cycle.featured, dir);
     apply({ fade: true });
+}
+
+/** Bring one bridge up on the big panel, keeping however it has been turned. */
+function feature(index) {
+    if (index === cycle.featured || !bridges[index] || !bridges[index].ready) return;
+    cycle.since = performance.now();
+    cycle.featured = index;
+    apply({ fade: true, keepAngle: true });
 }
 
 /* ------------------------------------------------------------------ *
@@ -489,12 +631,21 @@ function frame(now) {
     renderer.info.reset();
 
     advance(now);
+    showState();
     if (!cycle.paused) {
         for (const b of bridges) {
-            if (!b.ready) continue;
+            if (!b.ready || b === drag.bridge) continue;
             const dps = b === bridges[cycle.featured] ? SHOW.ORBIT_DPS : SHOW.IDLE_DPS;
             b.azimuth = (b.azimuth + dps * dt) % 360;
         }
+    }
+
+    if (redrawAll) {
+        // One heavy frame, hidden behind an opaque snapshot: every panel has to
+        // be holding its new bridge before the dissolve starts to uncover it.
+        redrawAll = false;
+        for (const p of panels) drawPanel(p);
+        return;
     }
 
     drawPanel(panels[0]);
@@ -515,7 +666,7 @@ function startLoop() {
     wipe();
     lastFrame = performance.now();
     cycle.since = performance.now();
-    apply({ fade: true });
+    apply();
     requestAnimationFrame(frame);
 }
 
@@ -529,10 +680,14 @@ async function loadAll() {
             b.model = await loadGLB(b.site.file);
             b.scene = buildScene(b.model);
             b.groups = detectSensors(b.model);
-            b.frame = frameFor(b.model, b.groups);
+            b.frame = litBox(b.model, b.groups);
             b.frame.getCenter(b.centre);
-            b.broadside = broadsideOf(b.model);
-            b.azimuth = b.broadside + i * 37;
+            // Judged on the big panel's shape, since that is the one that
+            // matters; the strip then uses the same angle at its own distance.
+            const big = panels[0].rect;
+            b.broadside = chooseBroadside(b.frame, b.centre, panels[0].camera.fov,
+                                          big.w / big.h, deckBroadside(b.model));
+            b.azimuth = b.broadside + i * 11;
             b.highlighter = createHighlighter(NO_VIEWER, b.groups);
             // Everything at once, each type in its own colour, and it stays
             // that way - the cycle only moves the camera from here on.
@@ -554,6 +709,72 @@ async function loadAll() {
         dom.fault.textContent = 'No bridge models could be loaded. Check the files in Model-glb/.';
         dom.fault.hidden = false;
     }
+}
+
+/* ------------------------------------------------------------------ *
+ * Anyone who walks up to it                                           *
+ * ------------------------------------------------------------------ */
+/** The bridge currently under someone's finger; its auto-orbit stands down. */
+const drag = { bridge: null };
+
+/** Stop the cycle taking a bridge away from someone who is looking at it. */
+const holdCycle = () => { cycle.hold = performance.now() + SHOW.HOLD_MS; };
+
+/** Say so when a presenter has stopped it on the space bar. Touching the screen
+ *  also holds the cycle for a minute, but that needs no announcing - whoever
+ *  did it is standing right there. */
+function showState() {
+    const state = cycle.paused ? 'paused' : '';
+    if (dom.held.textContent === state) return;
+    dom.held.textContent = state;
+    dom.held.hidden = !state;
+}
+
+/**
+ * Drag to turn, tap a small panel to bring it up.
+ *
+ * Only the azimuth moves: elevation and distance are fixed, so turning a bridge
+ * can never zoom it. Because the angle lives on the bridge rather than on the
+ * panel, one turned in the strip arrives on the big panel still facing that way.
+ */
+function bindPointer(p) {
+    let id = null, startX = 0, startY = 0, from = 0, moved = false, turning = null;
+
+    p.el.addEventListener('pointerdown', e => {
+        if (id !== null) return;
+        turning = bridges[p.bridge];
+        if (!turning || !turning.ready) return;
+        id = e.pointerId;
+        try { p.el.setPointerCapture(id); } catch { /* nothing to capture */ }
+        startX = e.clientX; startY = e.clientY;
+        from = turning.azimuth;
+        moved = false;
+        drag.bridge = turning;
+        holdCycle();
+        document.body.classList.add('has-pointer', 'dragging');
+    });
+
+    p.el.addEventListener('pointermove', e => {
+        if (e.pointerId !== id) return;
+        const dx = e.clientX - startX;
+        if (!moved && Math.hypot(dx, e.clientY - startY) > 4) moved = true;
+        if (moved) turning.azimuth = from + dx * SHOW.DRAG_DPP;
+    });
+
+    const release = e => {
+        if (e.pointerId !== id) return;
+        try { p.el.releasePointerCapture(id); } catch { /* already gone */ }
+        id = null;
+        drag.bridge = null;
+        document.body.classList.remove('dragging');
+        holdCycle();
+        // A tap on a waiting bridge promotes it. The big panel does nothing:
+        // pause stays on the space bar, where a visitor cannot hit it by
+        // accident while turning the bridge.
+        if (!moved && !p.big) feature(p.bridge);
+    };
+    p.el.addEventListener('pointerup', release);
+    p.el.addEventListener('pointercancel', release);
 }
 
 /* ------------------------------------------------------------------ *
@@ -588,7 +809,8 @@ addEventListener('keydown', e => {
     if (e.key === ' ') {
         e.preventDefault();
         cycle.paused = !cycle.paused;
-        if (!cycle.paused) cycle.since = performance.now();
+        if (!cycle.paused) { cycle.since = performance.now(); cycle.hold = 0; }
+        showState();                    // right away, not on the next frame
     } else if (e.key === 'ArrowRight') step(1);
     else if (e.key === 'ArrowLeft') step(-1);
     else if (e.key === 'f' || e.key === 'F') {
@@ -607,10 +829,15 @@ setInterval(tick, 10000);
  * Go                                                                  *
  * ------------------------------------------------------------------ */
 buildPanels();
+buildLegend();
+panels.forEach(bindPointer);
 measure();
 loadAll();
 
 // Same debug seam as the inspector page, for the test harness and the console.
 if (params.has('debug')) {
-    window.__show = { renderer, SHOW, bridges, panels, cycle, apply, step, measure, perf, LEVELS };
+    window.__show = {
+        renderer, SHOW, bridges, panels, cycle, apply, step, feature, measure,
+        perf, LEVELS, radiusFor, drag,
+    };
 }
