@@ -3,7 +3,8 @@
  *
  * One big panel featuring a bridge at a time, four small panels showing the
  * ones coming up. It runs itself, and anyone who walks up to it can take over:
- * tap a small panel to bring that bridge up, drag to turn it.
+ * tap a small panel to bring that bridge up, drag to turn it on either axis.
+ * Five seconds after they stop, it picks up where it left off.
  *
  * WHY ONE CANVAS
  * Five bridges are live at once. Five <canvas> elements would mean five WebGL
@@ -61,28 +62,48 @@ const SHOW = {
      * to hold the whole sweep. That second part is expensive: on SSW the fit at
      * 30 deg off broadside is 59% further out than at broadside, so a wide
      * sweep buys movement by shrinking the bridge for the entire show. At
-     * 1.5 deg/s a 14 s turn sweeps 21 deg, which costs about 14%.
+     * 2.2 deg/s a 14 s turn sweeps 31 deg, and the wider fit that pays for is
+     * the price of the livelier turn - measure it before changing this.
      */
-    ORBIT_DPS: 1.5,
+    ORBIT_DPS: 2.2,
     /**
      * And for the four waiting in the strip. Slower on purpose: those panels
      * are redrawn in rotation, a few times a second, so a gentle turn keeps
      * the step between redraws too small to read as juddering.
      */
-    IDLE_DPS:  0.8,
+    IDLE_DPS:  1.2,
     /**
-     * Degrees above the deck. Kept low: with the roadside cameras in the shot
-     * the lit box is around 8 m tall, which makes the VERTICAL fit the binding
-     * one on most bridges - and the across-deck half-width enters that fit as
-     * `half * sin(elevation)`, so every degree of tilt costs reach.
+     * The RESTING angle above the deck: what every shot is fitted at, and what
+     * the tilt returns to once a hand lets go. Kept low: with the roadside
+     * cameras in the shot the lit box is around 8 m tall, which makes the
+     * VERTICAL fit the binding one on most bridges - and the across-deck
+     * half-width enters that fit as `half * sin(elevation)`, so every degree
+     * of tilt costs reach.
      */
     FRAME:     { elevation: 12 },
+    /**
+     * How far a hand may tilt. Not 90: orbitDir() builds its right vector from
+     * UP x dir, which degenerates when the camera is straight overhead.
+     */
+    TILT_MAX:  80,
+    /** And how far above the model's own base the camera must stay, so tilting
+     *  under the deck to look up at the soffit cannot drop it through the
+     *  ground into the unlit underside. */
+    GROUND_CLEAR: 1.5,
+    /** Floor on the speed the tilt returns at. The return is mostly
+     *  proportional, which eases it; this is what guarantees it arrives. */
+    TILT_HOME_DPS: 8,
     /** Breathing room around the lit equipment, as a multiple of the tight fit. */
     FIT_PAD:   1.12,
     /** Degrees of turn per pixel dragged. */
     DRAG_DPP:  0.3,
-    /** After anyone touches it, how long before the cycle picks up again. */
-    HOLD_MS:   60000,
+    /**
+     * Stillness before the display takes itself back: the bridge starts
+     * turning again, the tilt eases home, and the cycle is free to move on.
+     * One number for all three - "back to normal" should not arrive in
+     * instalments.
+     */
+    HOLD_MS:   5000,
     /**
      * What the governor aims for. The per-level cap may be higher; this is the
      * line below which frames are judged too slow, and it stays fixed so the
@@ -90,6 +111,24 @@ const SHOW = {
      */
     TARGET_MS: 1000 / 30,
     SLOTS:     4,
+};
+
+/**
+ * Exceptions to the standard shot, by site code.
+ *
+ * Everything stays LIT either way - this only decides what the camera has to
+ * hold in frame, and what it turns about.
+ *
+ * SSW earns one. Its two cameras are on a single post at z 64 while the weigh
+ * station sits at z 39-46, so framing all four types puts the centre of the
+ * box at z 51.5 - in empty road, with nothing there to be the still point and
+ * the equipment swinging round the outside of it. Framing the weigh station
+ * and pivoting on the cabinet puts the still point on the hardware and, as a
+ * bonus, more than halves the amount of scene on screen. The cameras go on
+ * glowing; they simply leave the frame.
+ */
+const SHOT = {
+    SSW: { frame: [AXLE, WEIGHT, CABINET], pivot: CABINET },
 };
 
 const $ = id => document.getElementById(id);
@@ -292,9 +331,9 @@ function chooseBroadside(box, centre, fov, aspect, deckAz) {
  * there is room to spare on every side. Padding the box as well would pay for
  * the same margin twice.
  */
-function litBox(model, groups) {
+function litBox(model, groups, keys = SHOW.TYPES) {
     const box = new THREE.Box3();
-    for (const k of SHOW.TYPES) {
+    for (const k of keys) {
         const g = groups[k];
         if (g && g.focus && !g.focus.isEmpty()) box.union(g.focus);
     }
@@ -318,6 +357,14 @@ const bridges = SITES.map((site, i) => ({
     model: null, scene: null, groups: null, highlighter: null,
     azimuth: 0,                         // set from chooseBroadside() once loaded
     broadside: 0,
+    /** Tilt lives on the bridge too, so one turned by hand in the strip
+     *  arrives on the big panel still tilted that way. It returns to
+     *  SHOW.FRAME.elevation once the hand has been off it for HOLD_MS. */
+    elevation: SHOW.FRAME.elevation,
+    /** -Infinity, not 0: performance.now() starts near zero, so a plain 0 would
+     *  read as "touched a moment ago" and hold every bridge still for the
+     *  first HOLD_MS after the page loads. */
+    touchedAt: -Infinity,
     // Worked out once at load: everything is lit at once, so the shot never
     // changes while a bridge is on screen. `frame` is the lit equipment,
     // `fit` caches the fixed camera distance, one entry per panel shape.
@@ -414,7 +461,7 @@ function drawPanel(p) {
     cam.near = Math.max(0.1, b.model.span / 4000);
     cam.far = b.model.span * 12;
     cam.updateProjectionMatrix();
-    aim(cam, b.centre, b.azimuth, SHOW.FRAME.elevation, radiusFor(b, cam));
+    aim(cam, b.centre, b.azimuth, b.elevation, radiusFor(b, cam));
 
     // Two passes, so the lit equipment reads through the structure. The second
     // is cheap wherever it is used - the camera is restricted to the highlight
@@ -520,7 +567,10 @@ function apply({ fade = false, keepAngle = false } = {}) {
     const changing = panels.filter((p, i) => p.bridge !== want[i]);
     if (fade && changing.length) snapshot(changing);
 
-    if (!keepAngle && featured.ready) featured.azimuth = featured.broadside - turnSweep() / 2;
+    if (!keepAngle && featured.ready) {
+        featured.azimuth = featured.broadside - turnSweep() / 2;
+        featured.elevation = SHOW.FRAME.elevation;
+    }
     panels.forEach((p, i) => { p.bridge = want[i]; });
 
     swapText(dom.bigName, featured.site.name, fade);
@@ -634,9 +684,12 @@ function frame(now) {
     showState();
     if (!cycle.paused) {
         for (const b of bridges) {
-            if (!b.ready || b === drag.bridge) continue;
+            // Leave alone what is under a hand, and what a hand has only just
+            // let go of - that pause is the whole point of HOLD_MS.
+            if (!b.ready || b === drag.bridge || now - b.touchedAt < SHOW.HOLD_MS) continue;
             const dps = b === bridges[cycle.featured] ? SHOW.ORBIT_DPS : SHOW.IDLE_DPS;
             b.azimuth = (b.azimuth + dps * dt) % 360;
+            homeTilt(b, dt);
         }
     }
 
@@ -680,8 +733,16 @@ async function loadAll() {
             b.model = await loadGLB(b.site.file);
             b.scene = buildScene(b.model);
             b.groups = detectSensors(b.model);
-            b.frame = litBox(b.model, b.groups);
-            b.frame.getCenter(b.centre);
+            const shot = SHOT[b.site.code] || {};
+            b.frame = litBox(b.model, b.groups, shot.frame);
+            // What the camera turns about: a named group's centre where one is
+            // called for, the middle of the framed box otherwise. The fit takes
+            // the box and the pivot separately, so an off-centre pivot is
+            // handled already - it just costs reach.
+            const pivot = shot.pivot && b.groups[shot.pivot];
+            if (pivot && pivot.focus && !pivot.focus.isEmpty()) pivot.focus.getCenter(b.centre);
+            else b.frame.getCenter(b.centre);
+            b.elevation = SHOW.FRAME.elevation;
             // Judged on the big panel's shape, since that is the one that
             // matters; the strip then uses the same angle at its own distance.
             const big = panels[0].rect;
@@ -717,12 +778,40 @@ async function loadAll() {
 /** The bridge currently under someone's finger; its auto-orbit stands down. */
 const drag = { bridge: null };
 
-/** Stop the cycle taking a bridge away from someone who is looking at it. */
-const holdCycle = () => { cycle.hold = performance.now() + SHOW.HOLD_MS; };
+/** Someone is working on this bridge: hold its orbit, and stop the cycle
+ *  taking it away from them. Both let go HOLD_MS after the last movement. */
+function touched(b) {
+    const now = performance.now();
+    b.touchedAt = now;
+    cycle.hold = now + SHOW.HOLD_MS;
+}
+
+/**
+ * How far down this bridge can be tilted before the camera goes through the
+ * ground. At elevation `e` the eye sits `sin(e) * radius` above the pivot, so
+ * the limit is where that equals the drop from the pivot to the ground - and
+ * where the pivot is already lower than that, the camera may not go below
+ * level at all.
+ */
+function tiltFloor(b, radius) {
+    const drop = b.centre.y - (b.model.bbox.min.y + SHOW.GROUND_CLEAR);
+    if (drop >= radius) return -SHOW.TILT_MAX;
+    const deg = THREE.MathUtils.radToDeg(Math.asin(Math.max(drop, 0) / radius));
+    return Math.max(-SHOW.TILT_MAX, -deg);
+}
+
+/** Ease the tilt back to the resting angle. Mostly proportional, so it leaves
+ *  quickly and settles softly, with a floor on the speed so it arrives. */
+function homeTilt(b, dt) {
+    const d = SHOW.FRAME.elevation - b.elevation;
+    if (Math.abs(d) < 0.05) { b.elevation = SHOW.FRAME.elevation; return; }
+    const step = Math.min(Math.abs(d), Math.max(Math.abs(d) * 3.5, SHOW.TILT_HOME_DPS) * dt);
+    b.elevation += Math.sign(d) * step;
+}
 
 /** Say so when a presenter has stopped it on the space bar. Touching the screen
- *  also holds the cycle for a minute, but that needs no announcing - whoever
- *  did it is standing right there. */
+ *  also holds the cycle, but only for five seconds and only while whoever did
+ *  it is standing right there, so that needs no announcing. */
 function showState() {
     const state = cycle.paused ? 'paused' : '';
     if (dom.held.textContent === state) return;
@@ -731,14 +820,21 @@ function showState() {
 }
 
 /**
- * Drag to turn, tap a small panel to bring it up.
+ * Drag to turn on either axis, tap a small panel to bring it up.
  *
- * Only the azimuth moves: elevation and distance are fixed, so turning a bridge
- * can never zoom it. Because the angle lives on the bridge rather than on the
+ * Both angles move; the distance never does, so a hand can turn a bridge to
+ * any angle at all but can never zoom it into something unrecognisable. The
+ * camera follows the drag on both axes - pull right and it swings right, pull
+ * up and it rises. Because the angles live on the bridge rather than on the
  * panel, one turned in the strip arrives on the big panel still facing that way.
+ *
+ * The fit is worked out at the RESTING tilt and cached, so a steep tilt lets
+ * the bridge grow past the edges of the panel, exactly as turning past the
+ * fitted arc already does. That is the deal a fixed distance buys, and five
+ * seconds later the tilt has eased home anyway.
  */
 function bindPointer(p) {
-    let id = null, startX = 0, startY = 0, from = 0, moved = false, turning = null;
+    let id = null, startX = 0, startY = 0, fromAz = 0, fromEl = 0, moved = false, turning = null;
 
     p.el.addEventListener('pointerdown', e => {
         if (id !== null) return;
@@ -747,18 +843,25 @@ function bindPointer(p) {
         id = e.pointerId;
         try { p.el.setPointerCapture(id); } catch { /* nothing to capture */ }
         startX = e.clientX; startY = e.clientY;
-        from = turning.azimuth;
+        fromAz = turning.azimuth;
+        fromEl = turning.elevation;
         moved = false;
         drag.bridge = turning;
-        holdCycle();
+        touched(turning);
         document.body.classList.add('has-pointer', 'dragging');
     });
 
     p.el.addEventListener('pointermove', e => {
         if (e.pointerId !== id) return;
-        const dx = e.clientX - startX;
-        if (!moved && Math.hypot(dx, e.clientY - startY) > 4) moved = true;
-        if (moved) turning.azimuth = from + dx * SHOW.DRAG_DPP;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (!moved && Math.hypot(dx, dy) > 4) moved = true;
+        if (moved) {
+            turning.azimuth = fromAz + dx * SHOW.DRAG_DPP;
+            const floor = tiltFloor(turning, radiusFor(turning, p.camera));
+            turning.elevation = Math.min(SHOW.TILT_MAX,
+                Math.max(floor, fromEl - dy * SHOW.DRAG_DPP));
+        }
+        touched(turning);
     });
 
     const release = e => {
@@ -767,7 +870,7 @@ function bindPointer(p) {
         id = null;
         drag.bridge = null;
         document.body.classList.remove('dragging');
-        holdCycle();
+        touched(turning);
         // A tap on a waiting bridge promotes it. The big panel does nothing:
         // pause stays on the space bar, where a visitor cannot hit it by
         // accident while turning the bridge.
@@ -837,7 +940,7 @@ loadAll();
 // Same debug seam as the inspector page, for the test harness and the console.
 if (params.has('debug')) {
     window.__show = {
-        renderer, SHOW, bridges, panels, cycle, apply, step, feature, measure,
-        perf, LEVELS, radiusFor, drag,
+        renderer, SHOW, SHOT, bridges, panels, cycle, apply, step, feature, measure,
+        perf, LEVELS, radiusFor, drag, tiltFloor, homeTilt, litBox,
     };
 }

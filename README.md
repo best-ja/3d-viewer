@@ -205,9 +205,18 @@ whole array plus the conduit forms a visible line.
 ## The menu strip
 
 The sensor menu used to be a sidebar, 148 px of a phone screen wide and full height — which is
-where the bridge is. It is now one row under the title bar: the type chips scroll sideways if they
-have to, and **All**, **Floor** and the collapse chevron sit outside the scroller so they are
-always reachable. All four chips and the tail fit without scrolling at 390 px.
+where the bridge is. It is now a strip under the title bar, and **every chip is always visible**:
+they wrap onto a second row rather than scrolling sideways, with **All**, **Floor** and the
+collapse chevron as the last item on the line, dropping to their own row when the chips need the
+width.
+
+It scrolled sideways at first, and that was wrong twice over — a control you have to discover by
+swiping is one most people never find, and the chips past the edge sat behind All and Floor. It
+also passed its test: at 390 px in headless Chrome everything fit. Two things make a real iPhone
+tighter. `--font` puts Thai faces first so bridge names render with no network on site, and the
+first one that exists differs by platform — Leelawadee UI on Windows, **Thonburi** on iOS, whose
+Latin glyphs are wider, and the chip labels are all Latin. An SE or a 12 mini is also 375 or 360 px,
+not 390. Wrapping removes the dependency on both.
 
 **Every chip is a toggle.** A touch screen has no modifier to hold, so there is nothing to make a
 tap mean "add to the selection" rather than "replace it" — every tap toggles, and any number of
@@ -279,6 +288,12 @@ js/ui.js            menu strip, bridge picker, loader, toast
 Model-glb/*.glb     the bridge models
 ```
 
+**The stylesheets carry a `?v=` and it matters.** There is no build step to hash filenames, and
+iOS Safari has no hard reload — a phone that has seen the page once will happily keep serving the
+CSS it already has, which is indistinguishable from a change not working. `js/sites.js` is imported
+with a `?t=` for the same reason. Bump the number in both `index.html` and `show.html` whenever
+`css/app.css` or `css/show.css` changes; `show.html` loads both of them.
+
 three.js is pinned to **0.163.0** in the import map. The materials declare
 `KHR_materials_pbrSpecularGlossiness`, which no current three.js reads; they fall back to the
 `pbrMetallicRoughness` block every material also carries, so they render correctly. Bumping the
@@ -304,11 +319,18 @@ There is no splash screen and no progress bar. The layout appears straight away 
 fills in as its model lands, so nothing on screen ever looks like it is loading. A change of bridge
 cross-dissolves — all five panels at once, including the captions — rather than dipping to black.
 
-**Anyone can walk up and drive it.** Drag any panel to turn that bridge; tap one of the small
-panels to bring it up on the big one, keeping whatever angle it was turned to. Any touch holds the
-cycle for a minute so the display will not snatch a bridge away mid-sentence, then it carries on by
-itself. Dragging turns and nothing else: the camera distance is fixed, so a bridge can never be
-zoomed into something unrecognisable and left that way.
+**Anyone can walk up and drive it.** Drag any panel to turn that bridge on either axis — sideways
+swings the camera round, up and down raises and lowers it — or tap one of the small panels to bring
+it up on the big one, keeping whatever angle it was turned to.
+
+**Five seconds after the last movement the display takes itself back**: the bridge starts turning
+again, the tilt eases home to its resting angle, and the cycle is free to move on. One number
+covers all three, because "back to normal" arriving in instalments would just look broken.
+
+What a hand can never do is zoom. The distance is fixed, so a bridge can be turned to any angle at
+all and never left as something unrecognisable. Tilt it a long way and it simply grows past the
+edges of the panel, exactly as turning past the fitted arc does — and five seconds later it has
+eased back anyway.
 
 For a presenter there is also **space** to pause (the only state the screen announces),
 **left/right** to step between bridges and **f** for fullscreen. `?dwell=12000` overrides the
@@ -326,12 +348,23 @@ sensors become specks. Including the two roadside cameras costs real width — t
 23–41 m from the weigh station on four of the five bridges — which is why the shot is a run of
 instrumented bridge rather than a close-up of hardware.
 
+**SSW is the exception, in the `SHOT` table at the top of `js/show.js`.** Its two cameras sit on a
+single post 22 m up the deck from the weigh station, which put the centre of its box in empty road:
+nothing there to be the still point, and the equipment swinging round the outside of it. It frames
+the weigh station and pivots on the CAS/BTS cabinet instead. The cameras go on glowing — only the
+framing changed — and they simply leave the shot. That table is the place for any other bridge
+whose layout argues for its own treatment; `frame` picks the types to hold in view and `pivot`
+picks the group to turn about.
+
 The distance is worked out **once per bridge** and then held. It has to be: the fit depends on how
 much of the box lies along the view direction, and on a long bridge that term swings by 9 m as the
 azimuth sweeps, which reads as the camera creeping in and out. Fixing it also decides how the fit
 is taken — over the arc the orbit actually sweeps, not over the full circle, because the end-on fit
 sits 45–60% further out than the broadside one and fitting the circle would hold every bridge at
-its worst angle for the whole show. Turn a bridge past that arc by hand and it simply grows past
+its worst angle for the whole show. That is what ties the orbit speed to the shot width: a turn
+lasts one dwell, so the speed sets the sweep and the sweep sets the arc. Going from 1.5°/s to
+2.2°/s widens the sweep from 21° to 31° and costs a few per cent of shot width — worth measuring
+again before changing it. Turn a bridge past that arc by hand and it simply grows past
 the edges of the panel, which is what a fixed distance should do.
 
 Which side to stand on is searched for rather than assumed. Square across the deck is right four
@@ -363,7 +396,7 @@ the order that costs the least to look at:
 | 2 | 30 fps | every third frame | 0.75x |
 
 Level 2 is the only one that shows, because redrawing the strip less often is what makes its orbit
-judder — which is also why the waiting bridges turn at 0.8°/s against the featured bridge's 1.5°/s,
+judder — which is also why the waiting bridges turn at 1.2°/s against the featured bridge's 2.2°/s,
 so that whatever the cadence, the step between redraws stays too small to read. The page logs each
 change of level to the console. `?quality=0` pins it at full.
 
